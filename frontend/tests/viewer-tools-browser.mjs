@@ -61,7 +61,7 @@ export async function testViewerTools({ evaluate, command, key, count, choose, p
   const capture = await command('Page.captureScreenshot', { format: 'png' });
   await writeFile(join(tmpdir(), 'pacs-viewer-tools-synthetic.png'), Buffer.from(capture.data, 'base64'));
   await tool('Invert');
-  await choose(1); await count('Imagem 1 / 2');
+  await choose(1); await count('Imagem 1 / 2'); await pause(150);
   assert.equal(await evaluate("document.querySelector('[aria-label=Invert]').getAttribute('aria-pressed')"), 'false', 'nova série começa na apresentação DICOM');
   assert.equal(await text(), '', 'medição da série A não aparece em B');
   await tool('Length'); await drag([.35,.25],[.47,.25]); await waitText(/px/);
