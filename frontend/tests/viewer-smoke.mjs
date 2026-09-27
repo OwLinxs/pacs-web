@@ -8,6 +8,7 @@ import { join, extname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { syntheticDICOM } from './dicom-fixture.mjs';
+import { testViewerTools } from './viewer-tools-browser.mjs';
 
 const id = (n) => `${String(n).padStart(8, '0')}-00000000-00000000-00000000-00000000`;
 const study = id(1), series = id(2), instance = id(3);
@@ -37,7 +38,7 @@ const server = createServer(async (req, res) => {
   if (path === `${studyPath}/${id(6)}/instances`) { res.statusCode = 502; return json({ error: { code: 'VIEWER_UNAVAILABLE', message: 'Série indisponível.' } }); }
   if (path === `${studyPath}/${id(7)}/instances`) { await new Promise((resolve) => setTimeout(resolve, 300)); return json({ items: [{ orthancInstanceId: id(70), number: 1 }] }); }
   if (path.endsWith(`/${id(30)}/dicom`) && (failImage || expireImage)) { res.statusCode = expireImage ? 401 : 502; return json({ error: { code: 'FIXTURE_FAILURE', message: 'Falha sintética.' } }); }
-  if (path.endsWith('/dicom') && path.startsWith(studyPath)) { res.setHeader('Content-Type', 'application/dicom'); return res.end(syntheticDICOM()); }
+  if (path.endsWith('/dicom') && path.startsWith(studyPath)) { res.setHeader('Content-Type', 'application/dicom'); return res.end(syntheticDICOM({ calibrated: !path.includes(`/${id(4)}/`) })); }
   if (path.startsWith('/api/')) { res.statusCode = 404; return json({ error: { code: 'NOT_FOUND', message: 'Recurso fictício ausente.' } }); }
   try {
     const asset = path.startsWith('/assets/') && /^\/assets\/[\w.-]+$/.test(path) ? path.slice(1) : 'index.html';
@@ -93,22 +94,35 @@ try {
   assert.ok(calls.includes(studyPath) && calls.includes(instancesPath) && calls.includes(dicomPath));
   assert.ok(await evaluate('Array.from(document.querySelectorAll("canvas")).some(c => c.width > 0 && c.height > 0)'));
   const count = async (text) => { try { await until(() => evaluate(`document.body.textContent.includes(${JSON.stringify(text)})`)); } catch (error) { console.error('Estado sintético:', text, await evaluate('document.body.textContent'), failures, calls.slice(-5)); throw error; } };
-  const key = async (key) => { await evaluate(`document.querySelector('main').dispatchEvent(new KeyboardEvent('keydown', {key:${JSON.stringify(key)}, bubbles:true, cancelable:true}))`); };
+  // Eventos reais do Chrome: não dispara KeyboardEvent artificial no <main>.
+  const key = async (key) => {
+    const code = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 }[key];
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: code });
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: code });
+  };
   const choose = async (index) => { await evaluate(`document.querySelectorAll('aside button')[${index}].click()`); };
   const files = () => calls.filter((path) => path.endsWith('/dicom'));
   assert.equal(files().length, 1, 'não deve carregar a série inteira inicialmente');
   await evaluate("window.fixtureEngine = document.querySelector('main canvas')");
+  await testViewerTools({ evaluate, command, key, count, choose, pause, until });
+  const loadedAfterTools = files().length;
+  // Reproduz perda de foco do main que não era coberta no V1.
+  await evaluate("document.querySelector('aside button').focus()");
   await key('ArrowRight'); await count('Imagem 2 / 3');
-  assert.equal(files().length, 2);
-  await evaluate("document.querySelector('main').dispatchEvent(new WheelEvent('wheel', {deltaY:100, bubbles:true, cancelable:true}))");
+  assert.equal(files().length, loadedAfterTools + 1);
+  const wheelPoint = await evaluate("(() => {const r=document.querySelector('main canvas').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+  await command('Input.dispatchMouseEvent', { type:'mouseWheel', ...wheelPoint, deltaX:0, deltaY:100 });
   await count('Imagem 3 / 3');
   await key('ArrowDown'); await pause(100); await count('Imagem 3 / 3');
   await key('ArrowLeft'); await count('Imagem 2 / 3');
   await key('ArrowUp'); await count('Imagem 1 / 3');
+  await key('ArrowLeft'); await pause(100); await count('Imagem 1 / 3');
+  await key('ArrowDown'); await count('Imagem 2 / 3');
+  await key('ArrowUp'); await count('Imagem 1 / 3');
   await choose(1); await count('Imagem 1 / 2');
   assert.equal(await evaluate("document.querySelectorAll('aside button')[1].getAttribute('aria-pressed')"), 'true');
   assert.equal(await evaluate("window.fixtureEngine === document.querySelector('main canvas')"), true, 'engine/viewport deve ser reutilizado');
-  assert.equal(files().filter((path) => path.includes(`/${id(4)}/`)).length, 1);
+  assert.ok(files().filter((path) => path.includes(`/${id(4)}/`)).every((path) => path.endsWith(`/${id(40)}/dicom`)), 'sem prefetch da segunda imagem B');
   await choose(2); await count('Série sem imagens');
   await choose(3); await count('Série indisponível.');
   await choose(4); await choose(0); await count('Imagem 1 / 3');
@@ -120,8 +134,11 @@ try {
   await key('ArrowRight'); await count('Não foi possível carregar a imagem.');
   await key('ArrowRight'); await count('Imagem 3 / 3');
   failImage = false;
-  await evaluate("const input = document.createElement('input'); document.querySelector('main').append(input); input.focus(); input.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowLeft', bubbles:true})); input.remove()");
-  await count('Imagem 3 / 3');
+  for (const tag of ['input', 'textarea', 'select', 'div']) {
+    await evaluate(`{ const input = document.createElement('${tag}'); input.id='fixture-editable'; if ('${tag}' === 'div') input.contentEditable='true'; document.querySelector('main').append(input); input.focus(); }`);
+    await key('ArrowLeft'); await pause(100); await count('Imagem 3 / 3');
+    await evaluate("document.querySelector('#fixture-editable').remove()");
+  }
   assert.equal(failures.length, 0);
   assert.deepEqual(network.filter((url) => !url.startsWith(origin) && !url.startsWith('blob:') && !url.startsWith('data:') && !/^https:\/\/fonts\.(googleapis|gstatic)\.com\//.test(url)), []);
   const screenshot = await command('Page.captureScreenshot', { format: 'png' });
@@ -132,7 +149,7 @@ try {
   expireImage = true;
   await key('ArrowRight'); await count('Sua sessão expirou por segurança.');
   assert.equal(failures.length, 0);
-  console.log(`PASS: Viewer V1 — stack sob demanda, setas/scroll, contador, troca de série, vazio, falha e seleção obsoleta. Screenshot: ${output}`);
+  console.log(`PASS: Viewer V2 — stack sob demanda, setas/scroll, contador, troca de série, vazio, falha e seleção obsoleta. Screenshot: ${output}`);
 } finally {
   socket?.close(); chrome.kill();
   await once(chrome, 'exit').catch(() => {});

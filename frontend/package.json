@@ -14,6 +14,7 @@
     "@cornerstonejs/core": "5.11.0",
     "@cornerstonejs/dicom-image-loader": "5.11.0",
     "@cornerstonejs/metadata": "5.11.0",
+    "@cornerstonejs/tools": "5.11.0",
     "events": "3.3.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

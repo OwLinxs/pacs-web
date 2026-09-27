@@ -4,6 +4,8 @@ import { iniciaisDe, useSession } from '../auth/SessionProvider';
 import { Icon } from '../design-system/Icon';
 import { initialSeries, loadSeriesStack, navigationDelta } from '../viewer/selection';
 import type { StackController } from '../viewer/cornerstone';
+import type { ViewerTool } from '../viewer/tools';
+import { ViewerToolbar } from '../viewer/ViewerToolbar';
 
 const DARK = 'color-mix(in srgb, var(--color-neutral-900) 40%, black)';
 const HEADER = 'color-mix(in srgb, var(--color-neutral-900) 80%, black)';
@@ -19,7 +21,7 @@ type Props = {
 };
 
 /** Mantém header, faixa de ferramentas, painel e viewport do design original.
- * Sem simulações de pixels, marcadores de lateralidade ou ferramentas clínicas.
+ * Ferramentas oficiais; sem persistência de medições.
  */
 export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpired }: Props) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -31,6 +33,9 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
   const [position, setPosition] = useState({ index: 0, total: 0 });
   const select = useRef<(item: ViewerSeries) => void>(() => {});
   const retry = useRef<() => void>(() => {});
+  const controls = useRef<StackController | null>(null);
+  const [tool, setTool] = useState<ViewerTool>('WindowLevel');
+  const [inverted, setInverted] = useState(false);
 
   useEffect(() => {
     const element = viewport.current;
@@ -50,6 +55,7 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
     };
     const load = async (item: ViewerSeries) => {
       selection?.abort();
+      driver?.suspend();
       const current = new AbortController(); selection = current;
       active = item; setSelected(item); setPosition({ index: 0, total: 0 }); setState('loading');
       area.focus({ preventScroll: true });
@@ -59,6 +65,7 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
         if (!viewer) {
           viewer = import('../viewer/cornerstone').then(({ createStackViewer }) => createStackViewer(element, lifetime.signal, {
             loading: () => setState('image-loading'),
+            presentation: (value) => { if (!lifetime.signal.aborted) setInverted(value); },
             rendered: (index, total) => { setPosition({ index, total }); setState('ready'); },
             failed: () => fail(null, 'Não foi possível carregar a imagem. Selecione outra imagem ou série, ou tente novamente.'),
           }));
@@ -66,6 +73,7 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
           void viewer.catch(() => { viewer = null; });
         }
         driver = await viewer;
+        controls.current = driver;
         if (current.signal.aborted || lifetime.signal.aborted) return;
         await driver.setStack(paths, current.signal);
         if (!current.signal.aborted && !lifetime.signal.aborted && !paths.length) setState('empty');
@@ -97,13 +105,16 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
       if (delta) { event.preventDefault(); driver?.step(delta); }
     };
     area.addEventListener('wheel', wheel, { passive: false });
-    area.addEventListener('keydown', key);
+    // Capture enquanto esta tela está montada: foco pode estar no canvas,
+    // toolbar, painel ou body. Não depende do foco exato no <main>.
+    window.addEventListener('keydown', key, true);
     window.addEventListener('pacs-viewer-session-expired', expired);
     void list();
     return () => {
       lifetime.abort(); selection?.abort();
       select.current = () => {}; retry.current = () => {};
-      area.removeEventListener('wheel', wheel); area.removeEventListener('keydown', key);
+      area.removeEventListener('wheel', wheel); window.removeEventListener('keydown', key, true);
+      controls.current = null;
       window.removeEventListener('pacs-viewer-session-expired', expired);
     };
   }, [studyId, onSessionExpired]);
@@ -131,11 +142,9 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
           </button>
         </div>
       </header>
-      <div style={{ height: 50, flex: 'none', display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px', borderBottom: `1px solid ${LINE}`, background: 'color-mix(in srgb, var(--color-neutral-900) 70%, black)' }}>
-        <Icon name="panel" size={20} />
-        <span style={{ fontSize: 13 }}>Visualizador</span>
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--color-neutral-500)' }}>Scroll ou setas · 1 viewport</span>
-      </div>
+      <ViewerToolbar selected={tool} inverted={inverted} disabled={state !== 'ready'}
+        onSelect={(value) => { if (controls.current?.selectTool(value)) setTool(value); }}
+        onInvert={() => controls.current?.invert()} onReset={() => controls.current?.reset()} />
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <aside style={{ width: 160, flex: 'none', overflowY: 'auto', padding: 16, borderRight: `1px solid ${LINE}`, background: PANEL }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 20 }}><span>Séries</span><span>{series.length}</span></div>
@@ -161,6 +170,10 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
                 style={{ marginTop: 8, padding: '8px 16px', border: '1px solid var(--color-accent-500)', background: 'transparent', color: 'var(--color-accent-300)', font: 'inherit', cursor: 'pointer' }}>Tentar novamente</button>}
             </div>
           )}
+          {state === 'ready' && <div style={{ position: 'absolute', left: 14, top: 12, fontSize: 12, color: 'var(--color-neutral-300)', pointerEvents: 'none', maxWidth: '70%' }}>
+            <div>{selected?.modality || '—'} · Série {selected?.number || '—'}</div>
+            <div>{selected?.description || 'Série sem descrição'}</div>
+          </div>}
           {state === 'ready' && <span role="status" style={{ position: 'absolute', right: 14, bottom: 12, fontSize: 12, color: 'var(--color-neutral-300)', pointerEvents: 'none' }}>Imagem {position.index + 1} / {position.total} · {selected?.modality || '—'}</span>}
         </main>
       </div>

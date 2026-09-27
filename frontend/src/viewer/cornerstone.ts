@@ -1,6 +1,7 @@
 import { cache, Enums, imageLoader, init, RenderingEngine, utilities, type StackViewport } from '@cornerstonejs/core';
 import { init as initLoader, wadouri } from '@cornerstonejs/dicom-image-loader';
 import { utilities as metadata } from '@cornerstonejs/metadata';
+import { createViewerTools, initializeViewerTools, type ViewerTool } from './tools';
 
 export const VIEWER_SESSION_EXPIRED = 'pacs-viewer-session-expired';
 let initialized = false;
@@ -28,6 +29,7 @@ function initialize() {
       if (error.status === 401) window.dispatchEvent(new Event(VIEWER_SESSION_EXPIRED));
     },
   });
+  initializeViewerTools();
   initialized = true;
 }
 
@@ -35,10 +37,15 @@ export type StackCallbacks = {
   loading: () => void;
   rendered: (index: number, total: number) => void;
   failed: () => void;
+  presentation: (inverted: boolean) => void;
 };
 export type StackController = {
   setStack: (paths: string[], signal: AbortSignal) => Promise<void>;
   step: (delta: number) => void;
+  selectTool: (tool: ViewerTool) => boolean;
+  invert: () => void;
+  reset: () => void;
+  suspend: () => void;
 };
 
 /** Um engine por tela. Operações serializadas; nunca prefetch de pixels. */
@@ -57,6 +64,8 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
     } catch (error) { engine.destroy(); throw error; }
   } catch (error) { release(); throw error; }
   const viewport = engine.getViewport<StackViewport>('image');
+  let tools: ReturnType<typeof createViewerTools>;
+  try { tools = createViewerTools(element, viewport, engine.id); } catch (error) { engine.destroy(); release(); throw error; }
   let queue: Promise<void> = Promise.resolve();
   let currentSignal: AbortSignal | null = null;
   let imageIds: string[] = [];
@@ -67,7 +76,16 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
   const observer = new ResizeObserver(() => { if (!engine.hasBeenDestroyed) engine.resize(true, true); });
   observer.observe(element);
 
-  const render = async (index: number, signal: AbortSignal, load: () => Promise<unknown>) => {
+  const resetPresentation = () => {
+    viewport.setCamera({ flipHorizontal: false, flipVertical: false });
+    viewport.setViewPresentation({ rotation: 0 });
+    viewport.resetCamera();
+    viewport.resetProperties();
+    viewport.render();
+    callbacks.presentation(!!viewport.getProperties().invert);
+  };
+
+  const render = async (index: number, signal: AbortSignal, load: () => Promise<unknown>, reset = false) => {
     signal.throwIfAborted(); lifetime.throwIfAborted();
     // Aguarda somente a imagem solicitada antes de entregá-la ao viewport.
     // Em 5.11, o caminho GPU pode resolver a troca mesmo após erro do loader.
@@ -81,6 +99,7 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
     }
     await load();
     signal.throwIfAborted(); lifetime.throwIfAborted();
+    if (reset) resetPresentation();
     await new Promise<void>((resolve, reject) => {
       const cleanup = () => {
         window.clearTimeout(timer);
@@ -101,23 +120,27 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
     });
     signal.throwIfAborted(); lifetime.throwIfAborted();
     targetIndex = index;
+    tools.suspend(false);
+    callbacks.presentation(!!viewport.getProperties().invert);
     callbacks.rendered(index, imageIds.length);
   };
 
   lifetime.addEventListener('abort', () => {
     revision++;
     abortRequests();
+    tools.suspend(true);
     observer.disconnect();
     // Espera o decoder em execução antes de limpar os caches e liberar a próxima tela.
     void queue.then(() => {
       try {
-        engine.destroy(); cache.purgeCache(); wadouri.dataSetCacheManager.purge(); metadata.clearCacheData();
+        tools.dispose(); engine.destroy(); cache.purgeCache(); wadouri.dataSetCacheManager.purge(); metadata.clearCacheData();
       } finally { release(); }
     }).catch(() => { /* descarte sem detalhes clínicos em logs */ });
   }, { once: true });
 
   return {
     setStack(paths, signal) {
+      tools.suspend(true);
       const token = ++revision;
       currentSignal?.removeEventListener('abort', abortRequests);
       abortRequests();
@@ -132,18 +155,33 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
         cache.purgeCache(); wadouri.dataSetCacheManager.purge(); metadata.clearCacheData();
         imageIds = paths.map((path) => `wadouri:${path}`);
         targetIndex = 0;
-        if (imageIds.length) await render(0, signal, () => viewport.setStack(imageIds, 0));
+        if (imageIds.length) await render(0, signal, () => viewport.setStack(imageIds, 0), true);
       });
       queue = run.catch(() => {}).finally(() => { if (token === revision) busy = false; });
       return run;
     },
+    suspend() { tools.suspend(true); },
+    selectTool(tool) {
+      if (busy || lifetime.aborted || currentSignal?.aborted) return false;
+      return tools.select(tool);
+    },
+    invert() {
+      if (busy || lifetime.aborted || currentSignal?.aborted || !imageIds.length || tools.interacting()) return;
+      viewport.setProperties({ invert: !viewport.getProperties().invert });
+      viewport.render(); callbacks.presentation(!!viewport.getProperties().invert);
+    },
+    reset() {
+      if (busy || lifetime.aborted || currentSignal?.aborted || !imageIds.length || tools.interacting()) return;
+      resetPresentation();
+    },
     step(delta) {
       const signal = currentSignal;
-      if (!signal || signal.aborted || lifetime.aborted || busy || !imageIds.length) return;
+      if (!signal || signal.aborted || lifetime.aborted || busy || !imageIds.length || tools.interacting()) return;
       const index = Math.min(imageIds.length - 1, Math.max(0, targetIndex + delta));
       if (index === targetIndex) return;
       targetIndex = index;
       busy = true;
+      tools.suspend(true);
       callbacks.loading();
       const token = revision;
       queue = queue.then(() => render(index, signal, () => viewport.setImageIdIndex(index)))

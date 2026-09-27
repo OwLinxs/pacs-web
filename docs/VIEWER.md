@@ -1,11 +1,13 @@
-# Viewer DICOM — V1: séries e instâncias
+# Viewer DICOM — V2: ferramentas básicas
 
 ## Histórico
 
-- **Viewer V0:** pipeline real Orthanc → backend → Cornerstone validado com
-  sucesso no ambiente de teste pelo responsável pelo PACS, conforme informado.
-- **Viewer V1:** navegação de séries/instâncias, validada nesta entrega com
-  servidores e arquivos sintéticos. Não houve nova conexão ao Orthanc real.
+- **Viewer V0:** pipeline Orthanc → backend → Cornerstone validado com DICOM
+  real no ambiente PACS pelo responsável pelo sistema.
+- **Viewer V1:** séries, stack e navegação por scroll validados com DICOM real.
+  As setas apresentaram falha no teste real; a correção integra a V2.
+- **Viewer V2:** ferramentas básicas e correção do teclado, verificadas com
+  fixtures sintéticas e Chrome. Nenhum acesso ao Orthanc real nesta entrega.
 
 ## Fluxo e escopo
 
@@ -43,8 +45,8 @@ antecipado da série. Engine e viewport são mantidos ao trocar imagem e série.
 A API utilizada é descrita na [referência StackViewport](https://www.cornerstonejs.org/docs/api/core/namespaces/types/classes/istackviewport/).
 
 Scroll vertical sobre o viewport, ArrowDown/Right avançam; ArrowUp/Left recuam.
-As teclas ficam restritas ao viewport focado, sem capturar inputs/editáveis ou
-combinações com modificadores. Clicar numa série coloca foco na área da imagem.
+As teclas ficam ativas enquanto a tela Viewer estiver montada, sem capturar
+inputs/editáveis ou combinações com modificadores. Clicar numa série coloca foco na área da imagem.
 Não há navegação circular: os extremos permanecem na primeira/última imagem.
 O contador “Imagem X / Y” só confirma a imagem depois de `IMAGE_RENDERED`.
 
@@ -162,9 +164,11 @@ do design foram preservadas e são bloqueadas no teste sintético de navegador.
 - `@originjs/vite-plugin-commonjs`: 1.0.3, desenvolvimento/build Vite.
 
 Vite usa worker ES e configuração CommonJS recomendada para o loader. A carga do
-engine é dinâmica ao entrar no Viewer. Não se instala `@cornerstonejs/tools`.
+engine é dinâmica ao entrar no Viewer. `@cornerstonejs/tools` 5.11.0 foi adicionado na V2; seu peer dependency exige
+exatamente `@cornerstonejs/core` 5.11.0, já instalado. As versões dos outros
+pacotes Cornerstone foram preservadas.
 O build emite alertas de tamanho do chunk e módulos Node externos nas bibliotecas
-de codecs/XML. A instalação npm reportou 11 vulnerabilidades (5 moderadas e
+de codecs/XML. A instalação/auditoria npm da V2 reportou 12 vulnerabilidades (6 moderadas e
 6 altas) no grafo instalado; não foi aplicado audit fix ou atualização ampla
 nesta entrega. Estes alertas precisam de revisão antes de produção.
 
@@ -205,7 +209,7 @@ sistema. Não depende de PostgreSQL ou dados reais.
 ## Limitações e próxima validação
 
 Uma viewport WebGL2, navegação entre instâncias e apenas primeiro frame de cada
-instância multiframe. Não há navegação interna de frames, ferramentas, thumbnails,
+instância multiframe. Não há navegação interna de frames ou thumbnails,
 download UI, impressão, MPR, cine ou alterações no Orthanc. Objetos sem pixels (por exemplo SR), formatos
 não suportados e falhas de decodificação apresentam erro controlado. Não se
 promete suporte validado a todas as modalidades/transfer syntaxes; o teste visual
@@ -293,3 +297,148 @@ quatro setas, scroll, limites, troca de série, série vazia, erro de série,
 seleção obsoleta, falha de imagem com recuperação e expiração de sessão no
 arquivo DICOM. O teste bloqueia fontes externas e usa exclusivamente fixtures.
 As vulnerabilidades npm permanecem para análise separada; nenhum audit fix.
+
+
+## Viewer V2 — ToolGroup e ferramentas
+
+`frontend/src/viewer/tools.ts` registra as sete classes oficiais uma única vez,
+após inicializar o core e antes de habilitar a viewport. Cria um ToolGroup com
+ID derivado do RenderingEngine, associa explicitamente engine/viewport e o
+reutiliza durante a navegação e troca de séries. A toolbar é implementada em
+`ViewerToolbar.tsx`, com os ícones SVG locais, sem biblioteca adicional de ícones.
+Referência: [ToolGroups e bindings oficiais](https://www.cornerstonejs.org/docs/tutorials/basic-manipulation-tool/).
+
+Somente a ferramenta selecionada fica Active com `MouseBindings.Primary`.
+As outras ficam Passive, permitindo a interação padrão com annotations já
+criadas. Ao carregar metadados/pixels, ficam Enabled (visíveis, sem interação).
+Nenhum binding de botão direito/meio, touch especial ou roda foi adicionado.
+Scroll e setas continuam usando a navegação serializada V1, sem StackScrollTool
+concorrente. Durante um gesto de ferramenta, a navegação é ignorada; troca de
+série cancela a manipulação ativa pela API oficial.
+
+| Controle | Comportamento |
+| --- | --- |
+| Window/Level | WindowLevelTool; esquerdo + arrastar, sem presets |
+| Zoom | ZoomTool; esquerdo + arrastar, zoom central e limites oficiais configurados de 0,1 a 20 |
+| Pan | PanTool; esquerdo + arrastar |
+| Length | LengthTool, cálculos/texto oficiais; arrastar ou completar os pontos conforme padrão da biblioteca |
+| Angle | AngleTool, três pontos, ângulo calculado pela biblioteca |
+| Probe | ProbeTool, posição/valor/unidade disponíveis na imagem |
+| Rectangle ROI | RectangleROITool, área e estatísticas fornecidas pela biblioteca |
+| Invert | Alterna `viewport.setProperties({invert})`, sem alterar pixels do arquivo |
+| Reset | Restaura a apresentação DICOM da imagem corrente, preservando annotations |
+
+A ferramenta ativa e Invert têm indicação visual e `aria-pressed`. A toolbar
+fica indisponível durante carga, vazio ou erro. A ferramenta selecionada permanece
+ao trocar série; a apresentação volta ao padrão DICOM. Invert reflete a propriedade
+efetiva do viewport, inclusive a polaridade inicial da imagem. Não são criadas
+interpretações clínicas, unidades, presets ou valores derivados pela aplicação.
+
+### Calibração e unidades
+
+Length/ROI usam o tratamento de calibração oficial. Sem Pixel Spacing, a fixture
+foi medida em px, não mm; área usa a unidade correspondente da biblioteca.
+Não se atribui espaçamento artificial. A presença de espaçamento DICOM também
+não garante por si só calibração anatômica de uma radiografia: a validade depende
+da aquisição/metadados. Probe usa somente o valor/unidade que a biblioteca suporta.
+Referência: [unidades calibradas do Cornerstone](https://www.cornerstonejs.org/docs/api/tools/namespaces/utilities/functions/getcalibratedlengthunitsandscale/).
+
+### Reset e annotations
+
+Reset usa `setCamera` para remover flips, `setViewPresentation` para rotação zero,
+`resetCamera` para enquadramento/zoom/pan e `resetProperties` para VOI e inversão
+iniciais da imagem corrente, seguidos de render. Assim, WC/WW DICOM são respeitados
+quando presentes; caso contrário, vale o padrão calculado pelo Cornerstone.
+Reset não remove medições nem muda a ferramenta selecionada.
+
+Annotations ficam somente na memória da tela atual, associadas à imagem pelos
+mecanismos oficiais. Permanecem ao navegar A → B → A e não são mostradas em
+outra instância/série. Os UIDs de annotations criadas por este engine/viewport
+são acompanhados em memória para remoção no cleanup. Não há API, banco, arquivo,
+localStorage, DICOM SR ou exportação de annotations.
+
+Ao desmontar: aborta requisições, interrompe manipulações, aguarda o decoder,
+remove annotations próprias e listener de criação, limpa o histórico interno de
+gestos do único Viewer, remove/destroi o ToolGroup, destrói o RenderingEngine e
+limpa caches. Registros globais das classes Tools permanecem inicializados para
+reabertura, sem novo registro das mesmas classes. Reset não executa esse cleanup.
+
+### Correção das setas
+
+Na V1, o listener estava no `<main>` e dependia de seu foco (ou de um descendente).
+Foco no painel, botão ou body não propagava o evento por esse elemento. O teste
+anterior disparava `KeyboardEvent` diretamente no main, escondendo a fragilidade.
+Esta é a causa identificada no código; não houve inspeção do ambiente real nesta
+entrega. O listener agora fica no window em capture durante a montagem da tela,
+com remoção simétrica no cleanup. Ignora input, textarea, select, contenteditable,
+role textbox, teclas com modificadores e eventos já tratados. Não depende de
+refocar artificialmente o canvas para navegar.
+
+O smoke test usa `Input.dispatchKeyEvent` do Chrome, incluindo foco no painel,
+quatro setas, extremos do stack e editáveis. Também confere que reabrir não acumula
+listeners e que fechar reduz em um o listener keydown da janela.
+
+### Testes V2
+
+As interações gráficas são testadas no Chrome real/headless, não em jsdom:
+
+- seleção/estado ativo das sete ferramentas;
+- WL, Zoom e Pan por arrastos reais e mudança dos pixels apresentados;
+- Invert e Reset por estado visual e comparação do canvas;
+- Length em mm com spacing e em px sem spacing;
+- Angle com ângulo exibido, Probe com coordenadas/valor, ROI com estatísticas;
+- Reset conserva annotations; A → B → A mantém associação correta;
+- reabertura remove annotations antigas e não duplica viewport/listener;
+- contador, carga sob demanda, falhas e expiração de sessão mantêm os testes V1.
+
+`tests/viewer-tools-browser.mjs` é chamado pelo smoke existente. Captura a tela
+com medições fictícias em `pacs-viewer-tools-synthetic.png` no diretório temporário.
+Não injeta APIs de inspeção na aplicação de produção. As fixtures e respostas
+são inteiramente sintéticas. O teste visual não comprova exatidão diagnóstica para
+todas as modalidades, calibrações, codecs ou equipamentos; requer validação
+controlada antes de utilização clínica. Não há teste real do PACS nesta entrega.
+
+### Dependências e avisos V2
+
+Adicionado `@cornerstonejs/tools` **5.11.0** (versão exata), mais suas dependências
+resolvidas no lockfile. Nenhuma atualização deliberada de pacote não relacionado.
+`npm audit` reportou **12 vulnerabilidades: 6 moderadas e 6 altas**, inclusive
+avisos propagados por dependências transitivas do Cornerstone. A sugestão de
+correção do tools envolve versão incompatível; não foi aplicada. `lodash.get`
+transitivo também emitiu aviso de depreciação. Permanecem os avisos de módulos
+Node externos e tamanho dos chunks; Tools adiciona seu worker oficial ao build.
+Nenhum `npm audit fix`, downgrade ou correção ampla foi executado.
+
+### Arquivos V2
+
+Criados:
+
+- `frontend/src/viewer/tools.ts`
+- `frontend/src/viewer/ViewerToolbar.tsx`
+- `frontend/tests/viewer-tools-browser.mjs`
+
+Modificados:
+
+- `frontend/src/viewer/cornerstone.ts`
+- `frontend/src/screens/ViewerScreen.tsx`
+- `frontend/src/design-system/Icon.tsx`
+- `frontend/package.json`
+- `frontend/package-lock.json`
+- `frontend/tests/dicom-fixture.mjs`
+- `frontend/tests/viewer-smoke.mjs`
+- `docs/VIEWER.md`
+
+Backend, autenticação, Worklist, endpoints, banco e configuração Orthanc permanecem
+inalterados. Nenhuma porta/rede/produção foi alterada. A próxima etapa depende da
+revisão desta entrega e validação manual do V2 no ambiente controlado; MPR, cine,
+multiview e persistência continuam fora do escopo.
+
+### Resultado final V2
+
+Passaram: gofmt (verificação sem diferenças), go vet, go test, go build e
+`go test -race ./internal/orthanc ./internal/httpapi`. O backend não foi modificado.
+No frontend passaram typecheck, os nove testes Node existentes, build e smoke
+completo do Chrome com ferramentas, teclado real, roda real, recuperação de falhas
+e cleanup. A captura com Length, Angle, Probe e Rectangle ROI foi inspecionada.
+`npm audit` terminou com código 1 por reportar as vulnerabilidades descritas acima;
+isso não foi tratado como resultado aprovado de segurança nem corrigido nesta etapa.
