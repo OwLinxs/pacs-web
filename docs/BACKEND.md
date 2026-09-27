@@ -376,7 +376,7 @@ Os testes não precisam de PostgreSQL: usam as implementações em memória de
 
 ## Limitações atuais
 
-- A Worklist READ-ONLY está descrita em [WORKLIST.md](WORKLIST.md); não oferece viewer ou acesso a pixels.
+- A Worklist READ-ONLY está descrita em [WORKLIST.md](WORKLIST.md); o Viewer mínimo é descrito em [VIEWER.md](VIEWER.md).
 - `/api/admin/ping` é provisória.
 - O teste confirma somente a resposta de `/system`; não valida acesso a exames.
 - Não há rotação de chave mestra: trocar `PACS_MASTER_KEY` exige recadastrar as
@@ -386,13 +386,13 @@ Os testes não precisam de PostgreSQL: usam as implementações em memória de
 - `X-Forwarded-For` não é considerado: atrás de proxy, o IP registrado é o da
   conexão. Quando houver proxy, isso precisa de configuração explícita.
 - A auditoria de logout não registra origem (o IP não é propagado até ali).
-- Sem DICOMweb ou Cornerstone3D.
+- Sem DICOMweb; Cornerstone3D recebe DICOM Part 10 pelo gateway autenticado.
 - Sem golangci-lint: `gofmt` e `go vet` bastam para este tamanho.
 
 ## Próxima etapa (aguardando validação)
 
-Revisar a Worklist READ-ONLY e validar manualmente os filtros/paginação no
-ambiente controlado pelo responsável pelo PACS. Nenhuma chamada real foi feita
+Revisar o Viewer mínimo e validar manualmente a renderização no ambiente
+controlado pelo responsável pelo PACS. Nenhuma chamada real foi feita
 durante o desenvolvimento desta entrega.
 As demais pendências da auditoria permanecem fora desta entrega.
 

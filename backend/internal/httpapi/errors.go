@@ -54,7 +54,7 @@ func writeError(w http.ResponseWriter, log *slog.Logger, status int, codigo, men
 // writeInternalError registra o erro real e devolve uma resposta genérica.
 func writeInternalError(w http.ResponseWriter, log *slog.Logger, r *http.Request, err error) {
 	log.ErrorContext(r.Context(), "erro interno",
-		"metodo", r.Method, "rota", r.URL.Path, "erro", err)
+		"metodo", r.Method, "rota", requestLogRoute(r), "erro", err)
 	writeError(w, log, http.StatusInternalServerError, CodeInternal,
 		"Erro interno. Tente novamente; se persistir, contate o suporte de TI.")
 }

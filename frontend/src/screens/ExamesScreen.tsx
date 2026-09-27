@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, ApiError, type StudyPage } from '../api/client';
+import { api, ApiError, type Study, type StudyPage } from '../api/client';
 import { BlueprintCorners } from '../design-system/Blueprint';
 import { Icon, type IconName } from '../design-system/Icon';
 
@@ -47,10 +47,11 @@ const ESQUELETOS = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => ({
 
 type ExamesScreenProps = {
   onSessionExpired: () => void;
+  onAbrirExame: (study: Study) => void;
 };
 
 /** Worklist real: filtros e paginação são processados no backend/Orthanc. */
-export function ExamesScreen({ onSessionExpired }: ExamesScreenProps) {
+export function ExamesScreen({ onSessionExpired, onAbrirExame }: ExamesScreenProps) {
   const [q, setQ] = useState('');
   const [periodo, setPeriodo] = useState<PeriodoKey>('7d');
   const [instituicao, setInstituicao] = useState('');
@@ -290,11 +291,20 @@ export function ExamesScreen({ onSessionExpired }: ExamesScreenProps) {
           linhas.map((exame) => (
             <div
               key={exame.orthancStudyId}
+              role="button"
+              tabIndex={0}
+              onClick={() => onAbrirExame(exame)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault(); onAbrirExame(exame);
+                }
+              }}
               style={{
                 display: 'grid',
                 gridTemplateColumns: COLUNAS,
                 alignItems: 'center',
                 minHeight: 62,
+                cursor: 'pointer',
                 padding: '0 20px',
                 gap: 16,
                 borderBottom: '1px solid color-mix(in srgb, var(--color-text) 8%, transparent)',
@@ -377,7 +387,7 @@ export function ExamesScreen({ onSessionExpired }: ExamesScreenProps) {
                   <Icon name="image" />
                 </span>
               </span>
-              <span />
+              <span style={{ fontSize: 13, color: 'var(--color-accent-700)' }}>Abrir ›</span>
             </div>
           ))}
 

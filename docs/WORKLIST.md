@@ -145,8 +145,8 @@ O período inicial é de sete dias conforme o calendário local do navegador.
 O campo de pesquisa é explícito (nome, identificação, accession ou descrição);
 Instituição usa o valor DICOM, sem lista fictícia de unidades. O filtro mockado
 de modalidade foi retirado nesta versão; as modalidades reais são exibidas.
-A coluna conta Séries, não imagens. Não há ação Abrir ou ligação das linhas ao
-viewer; o protótipo antigo só continua acessível pelo painel de desenvolvimento.
+A coluna conta Séries, não imagens. As linhas agora abrem o Viewer mínimo
+descrito em [VIEWER.md](VIEWER.md), usando somente o ID Orthanc na rota.
 Os controles de estados mockados da Worklist também foram retirados do painel.
 
 ## Testes e limites desta entrega
@@ -180,5 +180,6 @@ npm run build
 ```
 
 Nenhum teste automatizado depende do PACS real, PostgreSQL real ou dados reais
-de pacientes. Não há viewer, DICOMweb, Cornerstone3D, pixels, download, upload,
-delete, modify, anonymize ou outra operação de escrita no Orthanc.
+de pacientes. O Viewer mínimo foi adicionado em entrega própria, descrita em
+[VIEWER.md](VIEWER.md). Não há DICOMweb, upload, delete, modify, anonymize ou
+outra operação de escrita no Orthanc.

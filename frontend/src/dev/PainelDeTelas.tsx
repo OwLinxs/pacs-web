@@ -17,7 +17,6 @@ const ITENS: { grupo: string; itens: Item[] }[] = [
     itens: [
       { id: '1a', label: 'Login', estado: { screen: 'login' } },
       { id: '1b', label: 'Exames / Worklist', estado: { screen: 'exames' } },
-      { id: '1c', label: 'Visualizador 1×1', estado: { screen: 'viewer', viewerState: 'ok' } },
     ],
   },
   {
@@ -32,8 +31,6 @@ const ITENS: { grupo: string; itens: Item[] }[] = [
   {
     grupo: '3 · Estados',
     itens: [
-      { id: '3d', label: 'Imagem carregando', estado: { screen: 'viewer', viewerState: 'loading' } },
-      { id: '3e', label: 'Erro ao carregar imagem', estado: { screen: 'viewer', viewerState: 'error' } },
       { id: '3f', label: 'Sistema indisponível', estado: { screen: 'indisponivel' } },
       { id: '3g', label: 'Sessão expirada', estado: { screen: 'expirada' } },
     ],
@@ -49,7 +46,7 @@ export function PainelDeTelas({ demo, onMudar }: PainelDeTelasProps) {
   const [aberto, setAberto] = useState(false);
 
   function aplicar(item: Item) {
-    onMudar({ ...demo, viewerState: 'ok', modalNovoMedico: false, ...item.estado });
+    onMudar({ ...demo, modalNovoMedico: false, ...item.estado });
   }
 
   return (

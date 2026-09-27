@@ -45,6 +45,7 @@ type opcoesCenario struct {
 	tentativasLogin int
 	orthanc         httpapi.OrthancTester
 	studies         httpapi.StudyFinder
+	viewer          httpapi.ViewerClient
 	log             *slog.Logger
 }
 
@@ -85,6 +86,7 @@ func montarCenario(t *testing.T, opcoes opcoesCenario) *cenario {
 		Settings:  configuracoes,
 		Orthanc:   opcoes.orthanc,
 		Studies:   opcoes.studies,
+		Viewer:    opcoes.viewer,
 		Auditoria: auditoria,
 	})
 	if err != nil {

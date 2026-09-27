@@ -15,6 +15,7 @@ import (
 	"github.com/pmfb-saude/pacs-web/backend/internal/orthanc"
 	"github.com/pmfb-saude/pacs-web/backend/internal/studies"
 	"github.com/pmfb-saude/pacs-web/backend/internal/user"
+	"github.com/pmfb-saude/pacs-web/backend/internal/viewer"
 )
 
 // Pinger é o que a checagem de prontidão precisa do banco.
@@ -30,6 +31,12 @@ type StudyFinder interface {
 	FindStudies(context.Context, orthanc.Config, studies.Query) (studies.Page, error)
 }
 
+type ViewerClient interface {
+	ViewerSeries(context.Context, orthanc.Config, string) ([]viewer.Series, error)
+	ViewerInstances(context.Context, orthanc.Config, string, string) ([]viewer.Instance, error)
+	OpenDICOM(context.Context, orthanc.Config, string, string, string) (viewer.DICOM, error)
+}
+
 // Deps são as dependências do servidor HTTP.
 type Deps struct {
 	Config config.Config
@@ -41,6 +48,7 @@ type Deps struct {
 	Settings SettingsStore
 	Orthanc  OrthancTester
 	Studies  StudyFinder
+	Viewer   ViewerClient
 	// Auditoria registra eventos administrativos. Opcional.
 	Auditoria AuditRecorder
 	// Now é opcional; o padrão é time.Now.
@@ -56,6 +64,7 @@ type Server struct {
 	settings  SettingsStore
 	orthanc   OrthancTester
 	studies   StudyFinder
+	viewer    ViewerClient
 	auditoria AuditRecorder
 	now       func() time.Time
 
@@ -88,6 +97,7 @@ func New(deps Deps) (*Server, error) {
 		settings:  deps.Settings,
 		orthanc:   deps.Orthanc,
 		studies:   deps.Studies,
+		viewer:    deps.Viewer,
 		auditoria: deps.Auditoria,
 		now:       agora,
 		loginLimiter: newRateLimiter(
@@ -115,6 +125,13 @@ func (s *Server) montarRotas() http.Handler {
 	mux.Handle("GET /api/auth/me", encadear(http.HandlerFunc(s.handleMe), s.requireSession))
 	mux.Handle("GET /api/studies", encadear(http.HandlerFunc(s.handleStudies),
 		s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor, user.RoleMedico)))
+	for route, handler := range map[string]http.HandlerFunc{
+		"GET /api/studies/{studyID}/series":                                         s.handleViewerSeries,
+		"GET /api/studies/{studyID}/series/{seriesID}/instances":                    s.handleViewerInstances,
+		"GET /api/studies/{studyID}/series/{seriesID}/instances/{instanceID}/dicom": s.handleViewerDICOM,
+	} {
+		mux.Handle(route, encadear(handler, s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor, user.RoleMedico)))
+	}
 
 	// Rota administrativa mínima, só para comprovar a autorização por perfil.
 	// Será substituída pelos endpoints reais de administração.

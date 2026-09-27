@@ -75,6 +75,7 @@ func executarServe(ctx context.Context, log *slog.Logger) error {
 		Settings:  configuracoes,
 		Orthanc:   orthancClient,
 		Studies:   orthancClient,
+		Viewer:    orthancClient,
 		Auditoria: auditoria,
 	})
 	if err != nil {

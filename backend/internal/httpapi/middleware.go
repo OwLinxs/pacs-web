@@ -63,7 +63,7 @@ func (s *Server) requestLogger(proximo http.Handler) http.Handler {
 		proximo.ServeHTTP(gravador, r)
 		s.log.InfoContext(r.Context(), "requisição",
 			"metodo", r.Method,
-			"rota", r.URL.Path,
+			"rota", requestLogRoute(r),
 			"status", gravador.status,
 			"duracao_ms", s.now().Sub(inicio).Milliseconds(),
 			"ip", ipDoPedido(r),
@@ -100,8 +100,11 @@ func (s *Server) recoverPanic(proximo http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if recuperado := recover(); recuperado != nil {
+				if recuperado == http.ErrAbortHandler {
+					panic(recuperado)
+				}
 				s.log.ErrorContext(r.Context(), "pânico no handler",
-					"metodo", r.Method, "rota", r.URL.Path, "panico", recuperado)
+					"metodo", r.Method, "rota", requestLogRoute(r), "panico", recuperado)
 				writeError(w, s.log, http.StatusInternalServerError, CodeInternal,
 					"Erro interno. Tente novamente; se persistir, contate o suporte de TI.")
 			}
@@ -242,7 +245,7 @@ func (s *Server) requireRole(perfis ...user.Role) func(http.Handler) http.Handle
 			}
 			if !slices.Contains(perfis, usuario.Role) {
 				s.log.WarnContext(r.Context(), "acesso negado por perfil",
-					"rota", r.URL.Path, "perfil", usuario.Role)
+					"rota", requestLogRoute(r), "perfil", usuario.Role)
 				writeError(w, s.log, http.StatusForbidden, CodeForbidden,
 					"Seu perfil não tem permissão para esta operação.")
 				return
@@ -274,4 +277,15 @@ func ipDoPedido(r *http.Request) string {
 // prazoDeSessao devolve o instante de expiração absoluta para o cookie.
 func (s *Server) prazoDeSessao(agora time.Time) time.Time {
 	return agora.Add(s.auth.AbsoluteTTL())
+}
+
+// Identificadores de estudo/série/instância não entram nos logs de requisição.
+func requestLogRoute(r *http.Request) string {
+	if strings.HasPrefix(r.URL.Path, "/api/studies/") {
+		return "/api/studies/{viewer-resource}"
+	}
+	if strings.HasPrefix(r.URL.Path, "/viewer/") {
+		return "/viewer/{studyID}"
+	}
+	return r.URL.Path
 }

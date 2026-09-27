@@ -11,10 +11,15 @@
     "typecheck": "tsc --build --force"
   },
   "dependencies": {
+    "@cornerstonejs/core": "5.11.0",
+    "@cornerstonejs/dicom-image-loader": "5.11.0",
+    "@cornerstonejs/metadata": "5.11.0",
+    "events": "3.3.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@originjs/vite-plugin-commonjs": "1.0.3",
     "@types/react": "^19.1.9",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.0",

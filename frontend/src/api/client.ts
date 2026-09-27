@@ -199,7 +199,42 @@ export type StudyPage = {
   nextOffset: number | null;
 };
 
+export type ViewerSeries = {
+  orthancSeriesId: string;
+  description: string;
+  number: string;
+  modality: string;
+  instanceCount: number;
+};
+
+export type ViewerInstance = { orthancInstanceId: string; number: number | null };
+
+export function viewerResourceID(id: string): string {
+  if (!/^[a-f0-9]{8}(-[a-f0-9]{8}){4}$/.test(id)) throw new Error('Identificador inválido.');
+  return id;
+}
+
+/** Sempre mesma origem; não aceita URL nem caminho arbitrário. */
+export function viewerDICOMPath(studyId: string, seriesId: string, instanceId: string): string {
+  return `/api/studies/${viewerResourceID(studyId)}/series/${viewerResourceID(seriesId)}/instances/${viewerResourceID(instanceId)}/dicom`;
+}
+
+export function viewerRoute(studyId: string): string { return `/viewer/${viewerResourceID(studyId)}`; }
+
+export function studyIDFromRoute(path: string): string | null {
+  const match = /^\/viewer\/([a-f0-9]{8}(?:-[a-f0-9]{8}){4})$/.exec(path);
+  return match?.[1] ?? null;
+}
+
 export const api = {
+  async getViewerSeries(studyId: string, signal: AbortSignal): Promise<{ items: ViewerSeries[] }> {
+    return requisitar('GET', `/api/studies/${viewerResourceID(studyId)}/series`, { signal });
+  },
+
+  async getViewerInstances(studyId: string, seriesId: string, signal: AbortSignal): Promise<{ items: ViewerInstance[] }> {
+    return requisitar('GET', `/api/studies/${viewerResourceID(studyId)}/series/${viewerResourceID(seriesId)}/instances`, { signal });
+  },
+
   async getStudies(query: StudyQuery, signal: AbortSignal): Promise<StudyPage> {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {

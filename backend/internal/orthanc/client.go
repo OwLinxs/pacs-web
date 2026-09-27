@@ -39,6 +39,8 @@ const (
 	InvalidResponse Failure = "invalid_response"
 	NotOrthanc      Failure = "not_orthanc"
 	Unavailable     Failure = "unavailable"
+	NotFound        Failure = "not_found"
+	TooLarge        Failure = "too_large"
 )
 
 // Config é construída exclusivamente da configuração persistida pelo ADMIN.
@@ -157,7 +159,8 @@ func (c *Client) newSession(cfg Config) (*session, error) {
 	return &session{client: client, base: u, username: cfg.Username, credential: cfg.Credential}, nil
 }
 
-func (s *session) read(ctx context.Context, method, path string, payload []byte, maxBytes int64) ([]byte, error) {
+// open é privado e só recebe caminhos construídos pelas operações tipadas.
+func (s *session) open(ctx context.Context, method, path string, payload []byte, accept string) (*http.Response, error) {
 	u := *s.base
 	// Só chamadas internas fornecem path; nunca aceita URL do navegador.
 	parts := strings.SplitN(path, "?", 2)
@@ -169,7 +172,7 @@ func (s *session) read(ctx context.Context, method, path string, payload []byte,
 	if err != nil {
 		return nil, InvalidTarget
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", accept)
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -180,8 +183,13 @@ func (s *session) read(ctx context.Context, method, path string, payload []byte,
 	if err != nil {
 		return nil, classify(err)
 	}
+	if response.StatusCode == http.StatusOK {
+		return response, nil
+	}
 	defer response.Body.Close()
 	switch {
+	case response.StatusCode == http.StatusNotFound:
+		return nil, NotFound
 	case response.StatusCode == http.StatusUnauthorized:
 		return nil, Unauthorized
 	case response.StatusCode == http.StatusForbidden:
@@ -191,6 +199,15 @@ func (s *session) read(ctx context.Context, method, path string, payload []byte,
 	case response.StatusCode != http.StatusOK:
 		return nil, Upstream
 	}
+	return nil, Upstream
+}
+
+func (s *session) read(ctx context.Context, method, path string, payload []byte, maxBytes int64) ([]byte, error) {
+	response, err := s.open(ctx, method, path, payload, "application/json")
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
 	if err != nil {
 		return nil, classify(err)

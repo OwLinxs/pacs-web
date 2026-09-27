@@ -5,13 +5,14 @@ Frontend React + TypeScript, backend Go, PostgreSQL próprio.
 
 O PACS em produção (Orthanc, OHIF, Keycloak, oauth2-proxy, proxy, NFS/TrueNAS)
 permanece independente. A integração READ-ONLY oferece o teste manual
-`GET /system` e a Worklist paginada, ambos usando a configuração salva pelo ADMIN.
+`GET /system`, a Worklist paginada e o Viewer mínimo, usando a configuração salva pelo ADMIN.
 Salvar a configuração não conecta ao Orthanc. Abrir Exames consulta a Worklist.
 
 - Design: `docs/DECISOES.md` (decisões por entrega)
 - Backend: `docs/BACKEND.md` (arquitetura, segurança, endpoints)
 - Teste Orthanc: `docs/ORTHANC_CONNECTION.md` (fluxo, TLS, SSRF e testes fictícios)
 - Worklist: `docs/WORKLIST.md` (contrato, paginação, modalidades e privacidade)
+- Viewer: `docs/VIEWER.md` (gateway autenticado, Cornerstone, limites e testes)
 
 ## Rodar em desenvolvimento
 
@@ -97,7 +98,7 @@ go build ./...
 # Frontend
 cd frontend
 npm run typecheck
-node --test tests/studies-api.test.mjs
+node --test tests/*.test.mjs
 npm run build
 ```
 
@@ -126,7 +127,7 @@ frontend/            frontend React + TypeScript
 
 backend/             backend Go
   cmd/server/        serve | migrate | admin create | keygen
-  internal/          config, database, user, auth, audit, settings, secrets, studies, orthanc, httpapi
+  internal/          config, database, user, auth, audit, settings, secrets, studies, viewer, orthanc, httpapi
   migrations/        SQL versionado, embutido no binário
   .env.example
 
