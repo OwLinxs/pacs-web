@@ -1,0 +1,13 @@
+frontend/node_modules
+frontend/dist
+.DS_Store
+*.local
+.env
+.claude/
+.env.*
+!.env.example
+!.env.compose.example
+
+# Go
+backend/pacs-server
+backend/tmp

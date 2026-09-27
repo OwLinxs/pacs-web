@@ -1,0 +1,70 @@
+# PACS Web Municipal — aplicação completa em um container.
+#
+# A imagem `pacs-web` traz o frontend compilado e o backend Go: o próprio
+# backend serve o SPA na mesma origem da API.
+#
+# Isolamento: rede e volume próprios deste projeto. NÃO conecte este compose à
+# rede do PACS em produção, e não aponte DATABASE_URL para o PostgreSQL interno
+# do Orthanc — são sistemas diferentes.
+#
+# Uso:
+#   cp .env.compose.example .env      # preencha os valores
+#   docker compose up -d --build
+#   docker compose exec app pacs-server admin create -name "..." -username ...
+
+name: pacs-web
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pacs-web:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-pacsweb}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pacsweb}?sslmode=disable
+      # Em produção o cookie exige HTTPS; o TLS termina no proxy da Prefeitura.
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      SESSION_ABSOLUTE_TTL: ${SESSION_ABSOLUTE_TTL:-12h}
+      SESSION_IDLE_TTL: ${SESSION_IDLE_TTL:-30m}
+      LOGIN_RATE_ATTEMPTS: ${LOGIN_RATE_ATTEMPTS:-10}
+      LOGIN_RATE_WINDOW: ${LOGIN_RATE_WINDOW:-5m}
+      # Cifra as credenciais do Orthanc em repouso. Vem do .env, nunca da imagem.
+      PACS_MASTER_KEY: ${PACS_MASTER_KEY:-}
+      # Frontend e API na mesma origem: CORS não é necessário.
+      ALLOWED_ORIGINS: ""
+    ports:
+      # Só no loopback do host: quem publica para a rede é o proxy existente.
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    networks:
+      - pacsweb
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pacsweb}
+      POSTGRES_USER: ${POSTGRES_USER:-pacsweb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
+    volumes:
+      # A imagem 18+ espera um único mount em /var/lib/postgresql.
+      - pacsweb-postgres:/var/lib/postgresql
+    networks:
+      - pacsweb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pacsweb} -d ${POSTGRES_DB:-pacsweb}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  pacsweb:
+    driver: bridge
+
+volumes:
+  pacsweb-postgres:

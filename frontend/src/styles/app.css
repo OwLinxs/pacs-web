@@ -1,0 +1,56 @@
+/* Estilos globais da aplicação — equivalentes ao <style> do protótipo de design.
+   Tudo o que for cor, fonte, espaço ou sombra vem dos tokens de industry.css. */
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+a {
+  color: var(--color-accent-700);
+}
+a:hover {
+  color: var(--color-accent-800);
+}
+
+/* Fundo de grade técnica usado nas telas de acesso e de estado do sistema. */
+.pacs-grid-ground {
+  background-color: var(--color-bg);
+  background-image: linear-gradient(color-mix(in srgb, var(--color-text) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-text) 5%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+  background-position: -1px -1px;
+}
+
+/* Estados de hover. O protótipo de design declara `style-hover` inline; em React
+   esses tints viram classes, mantendo exatamente as mesmas misturas de cor. */
+.pacs-hover-text:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.pacs-hover-text-4:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
+.pacs-hover-accent:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+.pacs-hover-accent-7:hover { background: color-mix(in srgb, var(--color-accent) 7%, transparent); }
+.pacs-hover-white:hover { background: color-mix(in srgb, white 8%, transparent); }
+.pacs-hover-accent-dark:hover { background: color-mix(in srgb, var(--color-accent-400) 15%, transparent); }
+
+/* Pesquisa da worklist — anel de foco do design. */
+.pacs-search:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+.pacs-search-sm:focus {
+  border-color: var(--color-accent);
+}
+
+@keyframes pacsShimmer {
+  0% { opacity: 0.55; }
+  50% { opacity: 1; }
+  100% { opacity: 0.55; }
+}
+@keyframes pacsSpin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pacsBar {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}

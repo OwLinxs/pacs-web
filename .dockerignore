@@ -1,0 +1,10 @@
+.git
+.claude
+frontend/node_modules
+frontend/dist
+docs
+*.md
+**/.env
+**/.env.*
+backend/pacs-server
+backend/tmp

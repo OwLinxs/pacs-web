@@ -1,0 +1,41 @@
+# Ambiente de DESENVOLVIMENTO do PACS Web Municipal.
+#
+# Isolado de propósito:
+#   - rede própria, sem qualquer ligação com a rede do PACS em produção;
+#   - porta 55432 no host, para não colidir com um PostgreSQL já instalado;
+#   - dados em volume nomeado, exclusivo deste projeto.
+#
+# Nada aqui toca Orthanc, OHIF, Keycloak, oauth2-proxy, Nginx Proxy Manager,
+# NFS ou TrueNAS.
+
+name: pacs-web-dev
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pacsweb
+      POSTGRES_USER: pacsweb
+      # Senha apenas deste banco de desenvolvimento local.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-desenvolvimento-local}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      # A imagem 18+ espera um único mount em /var/lib/postgresql e coloca os
+      # dados num subdiretório por versão maior.
+      - pacsweb-postgres:/var/lib/postgresql
+    networks:
+      - pacsweb-dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pacsweb -d pacsweb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  pacsweb-dev:
+    driver: bridge
+
+volumes:
+  pacsweb-postgres:
