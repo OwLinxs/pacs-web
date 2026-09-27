@@ -43,6 +43,7 @@ services:
       - "127.0.0.1:${APP_PORT:-8080}:8080"
     networks:
       - pacsweb
+      - pacs-prod
 
   postgres:
     image: postgres:18-alpine
@@ -65,6 +66,9 @@ services:
 networks:
   pacsweb:
     driver: bridge
+  pacs-prod:
+    external: true
+    name: pacs_pacs
 
 volumes:
   pacsweb-postgres:
