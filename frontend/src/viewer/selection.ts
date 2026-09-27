@@ -1,14 +1,20 @@
-import { api, viewerDICOMPath, type ViewerSeries, type ViewerInstance } from '../api/client';
+import { api, viewerDICOMPath, type ViewerSeries } from '../api/client';
 
-/** Somente a primeira série não vazia; nenhuma busca ou prefetch de pixels. */
-export async function selectInitialImage(studyId: string, signal: AbortSignal) {
-  const { items: series } = await api.getViewerSeries(studyId, signal);
-  for (const item of series) {
-    if (item.instanceCount < 1) continue;
-    const { items } = await api.getViewerInstances(studyId, item.orthancSeriesId, signal);
-    const instance = items[0];
-    if (!instance) continue; // série ficou vazia entre as duas consultas
-    return { series, selected: item, instance, path: viewerDICOMPath(studyId, item.orthancSeriesId, instance.orthancInstanceId) };
-  }
-  return { series, selected: null as ViewerSeries | null, instance: null as ViewerInstance | null, path: null };
+export function initialSeries(series: ViewerSeries[]): ViewerSeries | null {
+  return series.find((item) => item.instanceCount > 0) ?? series[0] ?? null;
+}
+
+/** O backend já ordena por InstanceNumber; conserva integralmente essa ordem. */
+export async function loadSeriesStack(studyId: string, seriesId: string, signal: AbortSignal) {
+  const { items } = await api.getViewerInstances(studyId, seriesId, signal);
+  return items.map((item) => viewerDICOMPath(studyId, seriesId, item.orthancInstanceId));
+}
+
+export function navigationDelta(event: KeyboardEvent): number {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented) return 0;
+  const target = event.target;
+  if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) return 0;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowRight') return 1;
+  if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') return -1;
+  return 0;
 }

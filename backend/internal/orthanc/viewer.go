@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/pmfb-saude/pacs-web/backend/internal/viewer"
 )
@@ -119,7 +120,7 @@ func (c *Client) ViewerInstances(ctx context.Context, cfg Config, studyID, serie
 	}
 	var raw []struct {
 		ID, Type, ParentSeries string
-		IndexInSeries          *int
+		MainDicomTags          map[string]string
 	}
 	if json.Unmarshal(body, &raw) != nil || raw == nil || len(raw) != len(series.Instances) {
 		return nil, InvalidResponse
@@ -133,7 +134,13 @@ func (c *Client) ViewerInstances(ctx context.Context, cfg Config, studyID, serie
 			return nil, InvalidResponse
 		}
 		delete(expected, instance.ID)
-		items = append(items, viewer.Instance{OrthancInstanceID: instance.ID, Number: instance.IndexInSeries})
+		// InstanceNumber (IS) é a ordem de apresentação, nunca inferência espacial.
+		var number *int
+		if value, err := strconv.ParseInt(strings.TrimSpace(instance.MainDicomTags["InstanceNumber"]), 10, 32); err == nil {
+			n := int(value)
+			number = &n
+		}
+		items = append(items, viewer.Instance{OrthancInstanceID: instance.ID, Number: number})
 	}
 	sort.Slice(items, func(i, j int) bool {
 		a, b := items[i].Number, items[j].Number

@@ -16,7 +16,7 @@ type Series struct {
 
 type Instance struct {
 	OrthancInstanceID string `json:"orthancInstanceId"`
-	Number            *int   `json:"number"`
+	Number            *int   `json:"number"` // InstanceNumber; null se ausente/inválido.
 }
 
 // DICOM possui apenas o stream e seu tamanho. O chamador precisa fechar Body.

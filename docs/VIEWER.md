@@ -1,4 +1,11 @@
-# Viewer DICOM mínimo
+# Viewer DICOM — V1: séries e instâncias
+
+## Histórico
+
+- **Viewer V0:** pipeline real Orthanc → backend → Cornerstone validado com
+  sucesso no ambiente de teste pelo responsável pelo PACS, conforme informado.
+- **Viewer V1:** navegação de séries/instâncias, validada nesta entrega com
+  servidores e arquivos sintéticos. Não houve nova conexão ao Orthanc real.
 
 ## Fluxo e escopo
 
@@ -9,13 +16,52 @@ A composição reutiliza o cliente Orthanc e `settings.OrthancConnection`, inclu
 a decifragem AES-GCM existente. Não há migration, cópia de arquivos ou mudança
 na configuração do PACS, autenticação, rede Docker ou exposição de portas.
 
-O clique/Enter/Espaço na linha abre a tela escura existente com uma viewport.
-O frontend consulta séries e seleciona a primeira com instâncias. Se uma série
-ficar vazia entre consultas, tenta a próxima. Carrega apenas a primeira instância,
-sem prefetch de outros pixels. A confirmação visual exige `IMAGE_RENDERED`, não
-apenas a conclusão da requisição. Há loading, vazio, erro sanitizado e sessão
-expirada. Ao sair, cancela requisições, destrói a viewport e limpa os caches
-padrão de imagem/metadados; não há cache customizado ou persistência clínica.
+O clique/Enter/Espaço na Worklist abre a tela escura com uma viewport. O painel
+lateral mostra todas as séries, com número, descrição, modalidade e quantidade
+de instâncias. Descrição vazia usa “Série sem descrição”; IDs internos não são
+exibidos. O card selecionado possui destaque e `aria-pressed`.
+
+A primeira série com instâncias é selecionada inicialmente; se todas estiverem
+vazias, seleciona a primeira e mostra o estado vazio. Clicar em outro card cancela
+a seleção anterior, consulta suas instâncias e começa pela primeira imagem.
+Respostas de seleções obsoletas não podem substituir a seleção atual. Erros em
+uma série mantêm o painel disponível para escolher outra.
+
+## Stack, navegação e carregamento
+
+O frontend conserva a ordem entregue pelo backend e monta um imageId por
+instância: `wadouri:/api/studies/{study}/series/{series}/instances/{instance}/dicom`.
+`StackViewport.setStack(imageIds, 0)` registra a série completa; somente a imagem
+inicial é solicitada. Antes de cada troca, o adaptador aguarda o loader oficial
+`imageLoader.loadImage` da imagem escolhida e usa `cache.putImageSync` do cache
+padrão. Isso permite capturar erros antes de trocar pixels: na versão 5.11, a
+promessa do caminho GPU pode concluir mesmo quando o loader falha. Não é um
+cache customizado; não existe armazenamento paralelo nem prefetch. A confirmação
+verifica também se a imagem efetivamente presente no viewport corresponde ao
+imageId solicitado. `setImageIdIndex` navega sob demanda, sem prefetch ou download
+antecipado da série. Engine e viewport são mantidos ao trocar imagem e série.
+A API utilizada é descrita na [referência StackViewport](https://www.cornerstonejs.org/docs/api/core/namespaces/types/classes/istackviewport/).
+
+Scroll vertical sobre o viewport, ArrowDown/Right avançam; ArrowUp/Left recuam.
+As teclas ficam restritas ao viewport focado, sem capturar inputs/editáveis ou
+combinações com modificadores. Clicar numa série coloca foco na área da imagem.
+Não há navegação circular: os extremos permanecem na primeira/última imagem.
+O contador “Imagem X / Y” só confirma a imagem depois de `IMAGE_RENDERED`.
+
+As cargas são serializadas: durante uma carga, novos eventos de navegação são
+ignorados, evitando fila ilimitada e rajadas de requests. A troca de série cancela
+a requisição anterior; um decoder já iniciado termina antes da próxima carga.
+Falha de imagem apresenta mensagem fixa, permite avançar/recuar ou selecionar
+outra série; “Tentar novamente” recarrega a série desde a primeira instância.
+Há estados separados para lista de séries, carga de série, carga de imagem,
+estudo vazio, série vazia, erros e sessão expirada, inclusive 401 do arquivo.
+
+Usa somente o cache padrão do Cornerstone, com orçamento de imagens de 256 MiB.
+Os caches de imagem, dataset Part 10 e metadados são limpos entre séries e ao
+encerrar a tela. Esse orçamento não é um limite absoluto de memória do processo:
+datasets, WebGL e buffers de decodificação também consomem memória. Não há cache
+customizado. Um único worker faz a decodificação; sair cancela HTTP e libera a
+viewport após encerrar a operação corrente.
 
 ## Endpoints da aplicação
 
@@ -31,9 +77,24 @@ assim como na Worklist atual.
 | `/api/studies/{studyID}/series/{seriesID}/instances/{instanceID}/dicom` | Stream `application/dicom`, `Content-Disposition: inline` |
 
 `number` da série é string DICOM (vazia se ausente); da instância é inteiro ou
-null (`IndexInSeries`). Listas vazias são `[]`. Tags opcionais ausentes não
-causam falha. A ordenação inicial usa SeriesNumber e IndexInSeries, com ID como
-desempate; não é ordenação espacial para reconstrução de volume.
+null (`MainDicomTags.InstanceNumber`, tag 0020,0013). Listas vazias são `[]`. Tags opcionais ausentes não
+causam falha.
+
+### Ordenação de instâncias
+
+`GET /series/{id}/instances?expand=true` já fornece MainDicomTags. Não são
+adicionadas chamadas por instância para buscar tags. `number` do DTO agora
+representa explicitamente InstanceNumber, substituindo o IndexInSeries usado
+no V0. O formato JSON permanece igual. A tag está entre as
+[Main DICOM Tags do Orthanc](https://orthanc.uclouvain.be/book/faq/main-dicom-tags.html).
+
+A ordenação usa InstanceNumber numérico crescente (inteiro de 32 bits, removendo
+espaços nas extremidades). Tags ausentes, vazias, inválidas ou fora desse intervalo
+produzem null e ficam depois das numeradas. Valores repetidos e itens sem número
+usam ID Orthanc em ordem lexicográfica como desempate determinístico. O
+IndexInSeries não é usado como substituto implícito. Não se infere anatomia,
+sequência clínica ou posição espacial. Séries continuam ordenadas por SeriesNumber
+numérico, com ID como desempate. O frontend não reordena a lista de instâncias.
 
 IDs devem ter o formato Orthanc de cinco grupos de oito hexadecimais minúsculos.
 O servidor verifica ParentStudy e associação da instância à série antes de
@@ -117,8 +178,8 @@ Part 10 inválidos, tamanho excedido, redirects/SSRF, streaming antes de termina
 a resposta upstream, cancelamento e interrupção sem JSON anexado. Há verificações
 de ausência de credenciais e identificadores nos erros/logs.
 
-Testes frontend verificam caminhos fixos, sessão/cancelamento, seleção da primeira
-série válida, vazio e erros. O smoke test abre o build real no Chrome com perfil
+Testes frontend verificam caminhos fixos, sessão/cancelamento, seleção inicial,
+stack completo na ordem do backend, vazio, erros e proteção de inputs/editáveis. O smoke test abre o build real no Chrome com perfil
 temporário e servidor fictício, navega desde a Worklist e exige IMAGE_RENDERED.
 A fixture gera em memória um DICOM grayscale 32×32 Explicit VR Little Endian,
 com dados exclusivamente fictícios. Não usa .env ou backend/Orthanc real.
@@ -143,9 +204,9 @@ sistema. Não depende de PostgreSQL ou dados reais.
 
 ## Limitações e próxima validação
 
-Somente primeira imagem/frame da primeira série não vazia, uma viewport WebGL2.
-Não há troca de séries, scroll de instâncias, ferramentas, download UI, impressão,
-MPR, cine ou alterações no Orthanc. Objetos sem pixels (por exemplo SR), formatos
+Uma viewport WebGL2, navegação entre instâncias e apenas primeiro frame de cada
+instância multiframe. Não há navegação interna de frames, ferramentas, thumbnails,
+download UI, impressão, MPR, cine ou alterações no Orthanc. Objetos sem pixels (por exemplo SR), formatos
 não suportados e falhas de decodificação apresentam erro controlado. Não se
 promete suporte validado a todas as modalidades/transfer syntaxes; o teste visual
 cobre apenas a fixture não comprimida. A próxima revisão deve confirmar o fluxo
@@ -156,13 +217,14 @@ expandir funcionalidades. Nenhuma conexão real foi feita nesta implementação.
 
 `gofmt -l .` sem saída; `go vet ./...`, `go test ./...`,
 `go test -race ./internal/orthanc ./internal/httpapi` e `go build ./...` passaram.
-Frontend: typecheck, oito testes Node e build passaram. O smoke test Chrome
-passou e a captura foi inspecionada: gradiente sintético efetivamente renderizado.
+Frontend: typecheck, nove testes Node e build passaram. O smoke test Chrome
+passou com navegação entre imagens/séries e a captura foi inspecionada: gradiente
+sintético efetivamente renderizado.
 A validação de browser cobre o build frontend com API simulada; a integração Go
 com REST/streaming é coberta separadamente por httptest. Não equivale a uma
 validação de ponta a ponta contra o Orthanc real.
 
-## Arquivos desta entrega
+## Arquivos da entrega V0 (histórico)
 
 Criados:
 
@@ -200,3 +262,34 @@ Modificados:
 
 Artefatos de build/dependências são gerados pelas verificações; não há alteração
 de Dockerfile, Compose, migrations, banco, credenciais ou configuração Orthanc.
+
+
+## Alterações V1
+
+Nenhum endpoint, dependência ou arquivo de código novo. Formatos DTO preservados;
+apenas a origem/semântica de `number` da instância passa a ser InstanceNumber.
+Nenhuma alteração em autenticação, Worklist, banco, configuração Orthanc ou Docker.
+
+Arquivos modificados:
+
+- `backend/internal/orthanc/viewer.go`
+- `backend/internal/orthanc/viewer_test.go`
+- `backend/internal/viewer/viewer.go`
+- `frontend/src/screens/ViewerScreen.tsx`
+- `frontend/src/viewer/cornerstone.ts`
+- `frontend/src/viewer/selection.ts`
+- `frontend/tests/viewer-api.test.mjs`
+- `frontend/tests/viewer-smoke.mjs`
+- `docs/VIEWER.md`
+
+Testes V1 acrescentam InstanceNumber explícito (inclusive divergente do
+IndexInSeries), ordenação numérica, empate, tag vazia/inválida, fallback e
+associação de instância inválida. Os testes anteriores continuam verificando
+séries/metadados, série inválida/vazia, associação estudo/série, sessão/perfis,
+streaming e ausência de configuração/credenciais em respostas.
+
+No Chrome, verifica stack sob demanda, reutilização da viewport, contador,
+quatro setas, scroll, limites, troca de série, série vazia, erro de série,
+seleção obsoleta, falha de imagem com recuperação e expiração de sessão no
+arquivo DICOM. O teste bloqueia fontes externas e usa exclusivamente fixtures.
+As vulnerabilidades npm permanecem para análise separada; nenhum audit fix.

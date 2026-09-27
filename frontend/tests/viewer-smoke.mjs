@@ -15,6 +15,8 @@ const studyPath = `/api/studies/${study}/series`;
 const instancesPath = `${studyPath}/${series}/instances`;
 const dicomPath = `${instancesPath}/${instance}/dicom`;
 const calls = [];
+let failImage = false;
+let expireImage = false;
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://fixture.invalid').pathname;
   const json = (body) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(body)); };
@@ -22,9 +24,20 @@ const server = createServer(async (req, res) => {
   if (path.startsWith('/api/')) calls.push(path);
   if (path === '/api/auth/me') return json({ user: { id: 'synthetic-user', name: 'Usuário fictício', username: 'ficticio', role: 'MEDICO', unit: null, active: true, accessValidUntil: null, lastLoginAt: null } });
   if (path === '/api/studies') return json({ items: [{ orthancStudyId: study, studyInstanceUid: '2.25.111111111', studyDate: '20260920', studyTime: '101112', patientName: 'FICTICIO^VIEWER', patientId: 'SYNTH-VIEWER', accessionNumber: 'SYNTH-ACC', studyDescription: 'Padrão sintético', institutionName: 'Instituição fictícia', modalities: ['OT'], seriesCount: 1 }], limit: 25, offset: 0, hasMore: false, nextOffset: null });
-  if (path === studyPath) return json({ items: [{ orthancSeriesId: series, description: 'Padrão sintético', number: '1', modality: 'OT', instanceCount: 1 }] });
-  if (path === instancesPath) return json({ items: [{ orthancInstanceId: instance, number: 1 }] });
-  if (path === dicomPath) { res.setHeader('Content-Type', 'application/dicom'); return res.end(syntheticDICOM()); }
+  if (path === studyPath) return json({ items: [
+    { orthancSeriesId: series, description: 'Série sintética A', number: '1', modality: 'OT', instanceCount: 3 },
+    { orthancSeriesId: id(4), description: 'Série sintética B', number: '2', modality: 'OT', instanceCount: 2 },
+    { orthancSeriesId: id(5), description: '', number: '3', modality: 'OT', instanceCount: 0 },
+    { orthancSeriesId: id(6), description: 'Série com falha fictícia', number: '4', modality: 'OT', instanceCount: 1 },
+    { orthancSeriesId: id(7), description: 'Série lenta fictícia', number: '5', modality: 'OT', instanceCount: 1 },
+  ] });
+  if (path === instancesPath) return json({ items: [3, 30, 31].map((n, i) => ({ orthancInstanceId: id(n), number: i + 1 })) });
+  if (path === `${studyPath}/${id(4)}/instances`) return json({ items: [40, 41].map((n, i) => ({ orthancInstanceId: id(n), number: i + 1 })) });
+  if (path === `${studyPath}/${id(5)}/instances`) return json({ items: [] });
+  if (path === `${studyPath}/${id(6)}/instances`) { res.statusCode = 502; return json({ error: { code: 'VIEWER_UNAVAILABLE', message: 'Série indisponível.' } }); }
+  if (path === `${studyPath}/${id(7)}/instances`) { await new Promise((resolve) => setTimeout(resolve, 300)); return json({ items: [{ orthancInstanceId: id(70), number: 1 }] }); }
+  if (path.endsWith(`/${id(30)}/dicom`) && (failImage || expireImage)) { res.statusCode = expireImage ? 401 : 502; return json({ error: { code: 'FIXTURE_FAILURE', message: 'Falha sintética.' } }); }
+  if (path.endsWith('/dicom') && path.startsWith(studyPath)) { res.setHeader('Content-Type', 'application/dicom'); return res.end(syntheticDICOM()); }
   if (path.startsWith('/api/')) { res.statusCode = 404; return json({ error: { code: 'NOT_FOUND', message: 'Recurso fictício ausente.' } }); }
   try {
     const asset = path.startsWith('/assets/') && /^\/assets\/[\w.-]+$/.test(path) ? path.slice(1) : 'index.html';
@@ -69,7 +82,7 @@ try {
   await until(() => evaluate('!!document.querySelector(\'[role="button"]\')'));
   await evaluate('document.querySelector(\'[role="button"]\').click()');
   try {
-    await until(() => evaluate('document.body.textContent.includes("Imagem inicial renderizada")'), 45000);
+    await until(() => evaluate('document.body.textContent.includes("Imagem 1 / 3")'), 45000);
   } catch (error) {
     console.error('Falhas JS no ambiente sintético:', failures);
     console.error('Chamadas fictícias:', calls);
@@ -79,12 +92,47 @@ try {
   assert.equal(await evaluate('location.pathname'), `/viewer/${study}`);
   assert.ok(calls.includes(studyPath) && calls.includes(instancesPath) && calls.includes(dicomPath));
   assert.ok(await evaluate('Array.from(document.querySelectorAll("canvas")).some(c => c.width > 0 && c.height > 0)'));
+  const count = async (text) => { try { await until(() => evaluate(`document.body.textContent.includes(${JSON.stringify(text)})`)); } catch (error) { console.error('Estado sintético:', text, await evaluate('document.body.textContent'), failures, calls.slice(-5)); throw error; } };
+  const key = async (key) => { await evaluate(`document.querySelector('main').dispatchEvent(new KeyboardEvent('keydown', {key:${JSON.stringify(key)}, bubbles:true, cancelable:true}))`); };
+  const choose = async (index) => { await evaluate(`document.querySelectorAll('aside button')[${index}].click()`); };
+  const files = () => calls.filter((path) => path.endsWith('/dicom'));
+  assert.equal(files().length, 1, 'não deve carregar a série inteira inicialmente');
+  await evaluate("window.fixtureEngine = document.querySelector('main canvas')");
+  await key('ArrowRight'); await count('Imagem 2 / 3');
+  assert.equal(files().length, 2);
+  await evaluate("document.querySelector('main').dispatchEvent(new WheelEvent('wheel', {deltaY:100, bubbles:true, cancelable:true}))");
+  await count('Imagem 3 / 3');
+  await key('ArrowDown'); await pause(100); await count('Imagem 3 / 3');
+  await key('ArrowLeft'); await count('Imagem 2 / 3');
+  await key('ArrowUp'); await count('Imagem 1 / 3');
+  await choose(1); await count('Imagem 1 / 2');
+  assert.equal(await evaluate("document.querySelectorAll('aside button')[1].getAttribute('aria-pressed')"), 'true');
+  assert.equal(await evaluate("window.fixtureEngine === document.querySelector('main canvas')"), true, 'engine/viewport deve ser reutilizado');
+  assert.equal(files().filter((path) => path.includes(`/${id(4)}/`)).length, 1);
+  await choose(2); await count('Série sem imagens');
+  await choose(3); await count('Série indisponível.');
+  await choose(4); await choose(0); await count('Imagem 1 / 3');
+  await pause(400);
+  assert.equal(files().some((path) => path.includes(`/${id(7)}/`)), false, 'seleção obsoleta não carrega pixels');
+  assert.equal(await evaluate("document.querySelectorAll('aside button')[0].getAttribute('aria-pressed')"), 'true');
+  // Falha de um arquivo não bloqueia a navegação para a próxima instância.
+  failImage = true;
+  await key('ArrowRight'); await count('Não foi possível carregar a imagem.');
+  await key('ArrowRight'); await count('Imagem 3 / 3');
+  failImage = false;
+  await evaluate("const input = document.createElement('input'); document.querySelector('main').append(input); input.focus(); input.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowLeft', bubbles:true})); input.remove()");
+  await count('Imagem 3 / 3');
   assert.equal(failures.length, 0);
   assert.deepEqual(network.filter((url) => !url.startsWith(origin) && !url.startsWith('blob:') && !url.startsWith('data:') && !/^https:\/\/fonts\.(googleapis|gstatic)\.com\//.test(url)), []);
   const screenshot = await command('Page.captureScreenshot', { format: 'png' });
   const output = join(tmpdir(), 'pacs-viewer-synthetic.png');
   await writeFile(output, Buffer.from(screenshot.data, 'base64'));
-  console.log(`PASS: Worklist → séries → instâncias → DICOM sintético → Cornerstone IMAGE_RENDERED. Screenshot: ${output}`);
+  await choose(1); await count('Imagem 1 / 2');
+  await choose(0); await count('Imagem 1 / 3');
+  expireImage = true;
+  await key('ArrowRight'); await count('Sua sessão expirou por segurança.');
+  assert.equal(failures.length, 0);
+  console.log(`PASS: Viewer V1 — stack sob demanda, setas/scroll, contador, troca de série, vazio, falha e seleção obsoleta. Screenshot: ${output}`);
 } finally {
   socket?.close(); chrome.kill();
   await once(chrome, 'exit').catch(() => {});

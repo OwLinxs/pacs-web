@@ -34,7 +34,7 @@ func TestViewerMetadataAndMembership(t *testing.T) {
 		case "/pacs/series/" + seriesID:
 			_ = json.NewEncoder(w).Encode(viewerSeries{ID: seriesID, Type: "Series", ParentStudy: studyID, Instances: []string{instanceID}})
 		case "/pacs/series/" + seriesID + "/instances?expand=true":
-			_ = json.NewEncoder(w).Encode([]map[string]any{{"ID": instanceID, "Type": "Instance", "ParentSeries": seriesID, "IndexInSeries": 1}})
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"ID": instanceID, "Type": "Instance", "ParentSeries": seriesID, "IndexInSeries": 99, "MainDicomTags": map[string]string{"InstanceNumber": "1"}}})
 		case "/pacs/instances/" + instanceID + "/file":
 			files.Add(1)
 			w.Header().Set("Content-Type", "application/dicom")
@@ -47,11 +47,11 @@ func TestViewerMetadataAndMembership(t *testing.T) {
 	defer server.Close()
 	client, cfg := simulatedClient(t, server), studiesConfig()
 	series, err := client.ViewerSeries(context.Background(), cfg, studyID)
-	if err != nil || len(series) != 1 || series[0].InstanceCount != 1 || series[0].Modality != "OT" {
+	if err != nil || len(series) != 1 || series[0].InstanceCount != 1 || series[0].Modality != "OT" || series[0].Number != "1" || series[0].Description != "Serie ficticia" {
 		t.Fatal("séries inválidas", err)
 	}
 	instances, err := client.ViewerInstances(context.Background(), cfg, studyID, seriesID)
-	if err != nil || len(instances) != 1 || instances[0].OrthancInstanceID != instanceID {
+	if err != nil || len(instances) != 1 || instances[0].OrthancInstanceID != instanceID || instances[0].Number == nil || *instances[0].Number != 1 {
 		t.Fatal("instâncias inválidas", err)
 	}
 	file, err := client.OpenDICOM(context.Background(), cfg, studyID, seriesID, instanceID)
@@ -216,5 +216,53 @@ func TestViewerValidationBeforeNetworkAndTimeout(t *testing.T) {
 	cfg.Timeout = 40 * time.Millisecond
 	if _, err := simulatedClient(t, server).ViewerSeries(context.Background(), cfg, fakeID(1)); !errors.Is(err, Timeout) {
 		t.Fatal(err)
+	}
+}
+
+func TestViewerInstanceNumberOrdering(t *testing.T) {
+	// Ordem recebida deliberadamente arbitrária; IndexInSeries não é InstanceNumber.
+	ids := []string{fakeID(8), fakeID(7), fakeID(6), fakeID(5), fakeID(4), fakeID(3)}
+	tags := []string{"", "inválido", "10", " 2 ", "2", "-1"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/pacs/series/"+fakeID(2) {
+			_ = json.NewEncoder(w).Encode(viewerSeries{ID: fakeID(2), Type: "Series", ParentStudy: fakeID(1), Instances: ids})
+			return
+		}
+		raw := []map[string]any{}
+		for i, id := range ids {
+			item := map[string]any{"ID": id, "Type": "Instance", "ParentSeries": fakeID(2), "IndexInSeries": i}
+			if i > 0 {
+				item["MainDicomTags"] = map[string]string{"InstanceNumber": tags[i]}
+			}
+			raw = append(raw, item)
+		}
+		_ = json.NewEncoder(w).Encode(raw)
+	}))
+	defer server.Close()
+	items, err := simulatedClient(t, server).ViewerInstances(context.Background(), studiesConfig(), fakeID(1), fakeID(2))
+	if err != nil || len(items) != 6 {
+		t.Fatal("lista inválida", err)
+	}
+	for i, expected := range []int{3, 4, 5, 6, 7, 8} {
+		if items[i].OrthancInstanceID != fakeID(expected) {
+			t.Fatal("ordenação não determinística")
+		}
+	}
+	if items[4].Number != nil || items[5].Number != nil {
+		t.Fatal("fallback inventou InstanceNumber")
+	}
+}
+
+func TestViewerInstanceWrongParentRejected(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/pacs/series/"+fakeID(2) {
+			_ = json.NewEncoder(w).Encode(viewerSeries{ID: fakeID(2), Type: "Series", ParentStudy: fakeID(1), Instances: []string{fakeID(3)}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"ID": fakeID(3), "Type": "Instance", "ParentSeries": fakeID(9)}})
+	}))
+	defer server.Close()
+	if _, err := simulatedClient(t, server).ViewerInstances(context.Background(), studiesConfig(), fakeID(1), fakeID(2)); !errors.Is(err, InvalidResponse) {
+		t.Fatal("associação inválida aceita")
 	}
 }
