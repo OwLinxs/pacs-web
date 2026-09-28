@@ -6,7 +6,21 @@
 - **Viewer V1:** séries, stack e scroll validados; setas apresentaram falha no teste real, corrigida na V2.
 - **Viewer V2: VALIDADO COM DICOM REAL**, conforme validação informada pelo responsável: séries, stack, scroll, quatro Arrow keys, Window/Level, Zoom, Pan, Length, Angle, Probe, Rectangle ROI, Invert, Reset e troca de ferramentas.
 - **Viewer V3:** thumbnails, layouts, múltiplos viewports, viewport ativo, Cine e gerenciamento de annotations. Teste manual no ambiente PACS apresentou funcionamento geral satisfatório, conforme informado pelo responsável.
-- **Viewer V4:** auto-layout, maximização interna, Rotate/Flip, Fit, Reset validado com as novas apresentações, toolbar e atalhos. Implementação e testes exclusivamente sintéticos; nenhuma conexão ao Orthanc real, deploy ou mudança de produção nesta entrega.
+- **Viewer V4: VALIDADO COM DICOM REAL**, conforme informado pelo responsável pelo PACS: auto-layout, 1x1/1x2/2x2, múltiplos viewports, maximização, séries, stack, thumbnails, Cine, Window/Level, Zoom, Pan, Length, Angle, Probe, Rectangle ROI, annotations, Invert, Rotate, Flip H/V, Fit, Reset e atalhos. A validação real foi externa ao desenvolvimento; nenhuma conexão ao Orthanc real ou deploy foi realizada nesta entrega.
+
+## Correção pontual na entrega Worklist V2
+
+Invert agora inicia **OFF**: depois de carregar o primeiro stack de cada série,
+o controlador aplica `setProperties({ invert: false })`, inclusive para
+MONOCHROME1 cuja apresentação nativa pode ser invertida. Aplica-se ao abrir estudo,
+primeira série, troca manual, auto-layout e série em outro viewport. Reset também
+retorna OFF. O usuário pode ligar Invert normalmente. Trata-se da preferência
+explícita de apresentação do PACS, sem modificar pixel data/DICOM; os demais
+comportamentos do Viewer e sua arquitetura não foram alterados.
+
+Regressão específica em Chrome com DICOM MONOCHROME1 sintético verifica esses
+fluxos e ativação manual. A regressão V2/V3/V4 usa o cenário sintético original
+separadamente. Nenhum paciente real participa dos testes.
 
 ## Arquitetura atual
 

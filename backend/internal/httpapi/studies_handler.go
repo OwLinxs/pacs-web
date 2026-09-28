@@ -14,7 +14,7 @@ import (
 )
 
 func parseStudiesQuery(raw string) (studies.Query, error) {
-	q := studies.Query{Limit: studies.DefaultLimit}
+	q := studies.Query{Limit: studies.DefaultLimit, Sort: "dateDesc"}
 	if len(raw) > 4096 {
 		return q, errors.New("Filtros excedem o tamanho permitido.")
 	}
@@ -23,6 +23,7 @@ func parseStudiesQuery(raw string) (studies.Query, error) {
 		return q, errors.New("Parâmetros de consulta inválidos.")
 	}
 	texts := map[string]*string{
+		"modality": &q.Modality, "sort": &q.Sort,
 		"dateFrom": &q.DateFrom, "dateTo": &q.DateTo, "patientName": &q.PatientName,
 		"patientId": &q.PatientID, "accessionNumber": &q.AccessionNumber,
 		"studyDescription": &q.StudyDescription, "institutionName": &q.InstitutionName,
@@ -80,6 +81,9 @@ func (s *Server) handleStudies(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Nunca registra erro upstream, filtros, identificadores ou corpo clínico.
 		status, code, message := http.StatusBadGateway, "PACS_UNAVAILABLE", "Não foi possível consultar os exames no PACS. Tente novamente; se persistir, contate o suporte de TI."
+		if errors.Is(err, orthanc.UnsupportedQuery) {
+			status, code, message = http.StatusUnprocessableEntity, "PACS_QUERY_UNSUPPORTED", "O PACS não suporta esta ordenação ou modalidade com paginação segura. Use ordem nativa sem modalidade ou contate o administrador."
+		}
 		if errors.Is(err, orthanc.Timeout) {
 			status, code, message = http.StatusGatewayTimeout, "PACS_TIMEOUT", "A consulta excedeu o tempo disponível. Reduza o período ou refine os filtros."
 		}

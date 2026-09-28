@@ -1,5 +1,5 @@
 // DICOM Part 10 sintético: quadrado 32x32, sem qualquer paciente real.
-export function syntheticDICOM({ calibrated = true, width = 32, height = 32 } = {}) {
+export function syntheticDICOM({ calibrated = true, width = 32, height = 32, monochrome1 = false } = {}) {
   const element = (group, tag, vr, value) => {
     let data = Buffer.isBuffer(value) ? value : Buffer.from(value, 'ascii');
     if (data.length % 2) data = Buffer.concat([data, Buffer.from([vr === 'UI' ? 0 : 32])]);
@@ -28,7 +28,7 @@ export function syntheticDICOM({ calibrated = true, width = 32, height = 32 } = 
     element(0x20, 0x52, 'UI', '2.25.333333333'),
     element(0x20, 0x11, 'IS', '1'), element(0x20, 0x13, 'IS', '1'),
     element(0x20, 0x32, 'DS', '0\\0\\0'), element(0x20, 0x37, 'DS', '1\\0\\0\\0\\1\\0'),
-    element(0x28, 2, 'US', us(1)), element(0x28, 4, 'CS', 'MONOCHROME2'),
+    element(0x28, 2, 'US', us(1)), element(0x28, 4, 'CS', monochrome1 ? 'MONOCHROME1' : 'MONOCHROME2'),
     element(0x28, 0x10, 'US', us(height)), element(0x28, 0x11, 'US', us(width)),
     ...(calibrated ? [element(0x28, 0x30, 'DS', '1\\1')] : []), element(0x28, 0x100, 'US', us(16)),
     element(0x28, 0x101, 'US', us(12)), element(0x28, 0x102, 'US', us(11)), element(0x28, 0x103, 'US', us(0)),

@@ -6,6 +6,7 @@ import { studyIDFromRoute, viewerRoute, type Study } from './api/client';
 import { AuditoriaScreen } from './screens/AuditoriaScreen';
 import { ConfiguracoesScreen } from './screens/ConfiguracoesScreen';
 import { SessaoExpiradaScreen, IndisponivelScreen } from './screens/EstadoSistemaScreens';
+import { initialWorklist } from './worklist/model';
 import { ExamesScreen } from './screens/ExamesScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { UsuariosScreen } from './screens/UsuariosScreen';
@@ -38,6 +39,7 @@ export function App() {
   const sessao = useSession();
   const [demo, setDemo] = useState<DemoState>(ESTADO_INICIAL);
   const [selectedStudy, setSelectedStudy] = useState<Study | null>(null);
+  const [worklist, setWorklist] = useState(initialWorklist);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -64,6 +66,7 @@ export function App() {
   }, []);
 
   function irPara(screen: Screen) {
+    if (TELAS_SEM_SESSAO.includes(screen)) setWorklist(initialWorklist());
     if (screen !== 'viewer' && window.location.pathname.startsWith('/viewer/')) window.history.pushState(null, '', '/');
     setSelectedStudy(null);
     setDemo((atual) => ({ ...atual, screen, studyId: null, modalNovoMedico: false }));
@@ -76,10 +79,13 @@ export function App() {
   }
 
   const expirarSessao = useCallback(() => {
+    setWorklist(initialWorklist());
+    setSelectedStudy(null);
     setDemo((atual) => ({ ...atual, screen: 'expirada' }));
   }, []);
 
   async function sair() {
+    setWorklist(initialWorklist());
     await sessao.logout();
     irPara('login');
   }
@@ -133,7 +139,7 @@ export function App() {
         onExpirar={() => irPara('expirada')}
         onIndisponivel={() => irPara('indisponivel')}
       >
-        {telaDoShell === 'exames' && <ExamesScreen onSessionExpired={expirarSessao} onAbrirExame={abrirExame} />}
+        {telaDoShell === 'exames' && <ExamesScreen state={worklist} onStateChange={setWorklist} onSessionExpired={expirarSessao} onAbrirExame={abrirExame} />}
         {telaDoShell === 'usuarios' && (
           <UsuariosScreen
             key={demo.modalNovoMedico ? 'com-modal' : 'sem-modal'}

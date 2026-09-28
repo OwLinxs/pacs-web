@@ -3,6 +3,7 @@ package studies
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -15,7 +16,10 @@ const (
 	MaxOffset    = 10000
 )
 
+var modalityPattern = regexp.MustCompile(`^[A-Z0-9_ ]{1,16}$`)
+
 type Query struct {
+	Modality, Sort                                                             string
 	Limit, Offset                                                              int
 	DateFrom, DateTo                                                           string
 	PatientName, PatientID, AccessionNumber, StudyDescription, InstitutionName string
@@ -23,6 +27,12 @@ type Query struct {
 
 // Validate não inclui valores recebidos nas mensagens de erro.
 func (q Query) Validate() error {
+	if q.Sort != "" && q.Sort != "dateDesc" && q.Sort != "dateAsc" && q.Sort != "native" {
+		return errors.New("Ordenação não suportada.")
+	}
+	if q.Modality != "" && !modalityPattern.MatchString(q.Modality) {
+		return errors.New("Modalidade inválida: use um código DICOM de até 16 caracteres.")
+	}
 	if q.Limit < 1 || q.Limit > MaxLimit || q.Offset < 0 || q.Offset > MaxOffset {
 		return errors.New("Paginação inválida: limite de 1 a 50 e deslocamento de 0 a 10000.")
 	}

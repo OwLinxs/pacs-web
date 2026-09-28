@@ -160,6 +160,8 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
     viewport.setViewPresentation({ rotation: 0 });
     viewport.resetCamera();
     viewport.resetProperties();
+    // Preferência PACS: apresentação inicial/Reset sem inversão, inclusive MONOCHROME1.
+    viewport.setProperties({ invert: false });
     viewport.render();
     callbacks.presentation(readPresentation(viewport));
   };

@@ -1,510 +1,134 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError, type Study, type StudyPage } from '../api/client';
 import { BlueprintCorners } from '../design-system/Blueprint';
-import { Icon, type IconName } from '../design-system/Icon';
+import { Icon } from '../design-system/Icon';
+import { SEARCH_FIELDS, initialWorklist, periodDates, studyQuery, validateWorklist, dicomDate, dicomTime, modalities, type WorklistState, type SearchField, type Period } from '../worklist/model';
 
-/** Estados da consulta real, usando a apresentação existente. */
-type ListState = 'ok' | 'loading' | 'empty' | 'error';
-
-type PeriodoKey = 'hoje' | 'ontem' | '7d' | 'per';
-
-const PERIODOS: { key: PeriodoKey; label: string; icon?: IconName }[] = [
-  { key: 'hoje', label: 'Hoje' },
-  { key: 'ontem', label: 'Ontem' },
-  { key: '7d', label: '7 dias' },
-  { key: 'per', label: 'Período', icon: 'calendar' },
-];
-
-const PAGE_SIZE = 25;
-const CAMPOS = [
-  { key: 'patientName', label: 'Nome do paciente' },
-  { key: 'patientId', label: 'Identificação do paciente' },
-  { key: 'accessionNumber', label: 'Accession Number' },
-  { key: 'studyDescription', label: 'Descrição do estudo' },
-] as const;
-type Campo = typeof CAMPOS[number]['key'];
-
-function dataLocal(diasAtras: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() - diasAtras);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function exibirData(value: string): string {
-  return /^\d{8}$/.test(value) ? `${value.slice(6, 8)}/${value.slice(4, 6)}/${value.slice(0, 4)}` : value || '—';
-}
-
-function exibirHora(value: string): string {
-  return /^\d{4}/.test(value) ? `${value.slice(0, 2)}:${value.slice(2, 4)}` : value || '—';
-}
-
-const COLUNAS = '104px minmax(0,1.4fr) 92px 90px minmax(0,1.6fr) minmax(0,1.3fr) 64px 60px';
-
-const ESQUELETOS = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => ({
-  w1: `${50 + ((i * 7) % 40)}%`,
-  w2: `${40 + ((i * 13) % 45)}%`,
-}));
-
-type ExamesScreenProps = {
+type Props = {
+  state: WorklistState;
+  onStateChange: (state: WorklistState) => void;
   onSessionExpired: () => void;
   onAbrirExame: (study: Study) => void;
 };
+const PERIODS: { key: Period; label: string }[] = [
+  { key: 'today', label: 'Hoje' }, { key: 'yesterday', label: 'Ontem' },
+  { key: '7days', label: 'Últimos 7 dias' }, { key: '30days', label: 'Últimos 30 dias' }, { key: 'custom', label: 'Personalizado' },
+];
+const COMMON_MODALITIES = ['CR', 'DX', 'CT', 'MR', 'US', 'MG', 'XA', 'RF', 'OT'];
+const COLUMNS = '110px minmax(140px,1.4fr) 105px 85px minmax(130px,1.4fr) 110px minmax(120px,1fr) 48px';
 
-/** Worklist real: filtros e paginação são processados no backend/Orthanc. */
-export function ExamesScreen({ onSessionExpired, onAbrirExame }: ExamesScreenProps) {
-  const [q, setQ] = useState('');
-  const [periodo, setPeriodo] = useState<PeriodoKey>('7d');
-  const [instituicao, setInstituicao] = useState('');
-  const [campo, setCampo] = useState<Campo>('patientName');
-  const [menu, setMenu] = useState(false);
-  const [dataInicial, setDataInicial] = useState(() => dataLocal(6));
-  const [dataFinal, setDataFinal] = useState(() => dataLocal(0));
-  const [offset, setOffset] = useState(0);
+/** Estado de filtros vive somente na memória de App durante a sessão. */
+export function ExamesScreen({ state, onStateChange, onSessionExpired, onAbrirExame }: Props) {
   const [page, setPage] = useState<StudyPage | null>(null);
-  const [listState, setListState] = useState<ListState>('loading');
-  const [erro, setErro] = useState('');
-  const [atualizadoEm, setAtualizadoEm] = useState<Date | null>(null);
-  const [tentativa, setTentativa] = useState(0);
-
-  const inicio = periodo === 'per' ? dataInicial : dataLocal(periodo === '7d' ? 6 : periodo === 'ontem' ? 1 : 0);
-  const fim = periodo === 'per' ? dataFinal : dataLocal(periodo === 'ontem' ? 1 : 0);
-
+  const [status, setStatus] = useState<'loading' | 'refreshing' | 'ok' | 'error'>('loading');
+  const [error, setError] = useState('');
+  const [updated, setUpdated] = useState<Date | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [refresh, setRefresh] = useState(false);
+  const validation = validateWorklist(state);
+  // String usada apenas como dependência em memória; nunca URL de navegação/log/storage.
+  const queryKey = JSON.stringify(studyQuery(state));
   useEffect(() => {
     const controller = new AbortController();
-    setListState('loading');
-    setPage(null);
-    setAtualizadoEm(null);
-    setErro('');
+    if (validation) { setStatus('error'); setError(validation); setPage(null); return () => controller.abort(); }
+    setStatus(refresh ? 'refreshing' : 'loading');
+    if (!refresh) setPage(null);
+    setError('');
     const timer = window.setTimeout(() => {
-      void api.getStudies({ limit: PAGE_SIZE, offset, dateFrom: inicio, dateTo: fim,
-        [campo]: q.trim(), institutionName: instituicao.trim(),
-      }, controller.signal).then((result) => {
+      void api.getStudies(JSON.parse(queryKey), controller.signal).then(result => {
         if (controller.signal.aborted) return;
-        setPage(result);
-        setListState(result.items.length ? 'ok' : 'empty');
-        setAtualizadoEm(new Date());
-      }).catch((error: unknown) => {
+        setPage(result); setStatus('ok'); setUpdated(new Date());
+      }).catch((cause: unknown) => {
         if (controller.signal.aborted) return;
-        if (error instanceof ApiError && error.status === 401) {
-          onSessionExpired();
-          return;
-        }
-        setErro(error instanceof ApiError ? error.message : 'Não foi possível consultar os exames. Verifique sua conexão.');
-        setListState('error');
+        if (cause instanceof ApiError && cause.status === 401) { onSessionExpired(); return; }
+        setError(cause instanceof ApiError ? cause.message : 'Não foi possível consultar os exames. Verifique sua conexão.');
+        setStatus('error'); setPage(null);
       });
     }, 350);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [q, campo, instituicao, inicio, fim, offset, tentativa, onSessionExpired]);
+  }, [queryKey, revision, validation, refresh, onSessionExpired]);
 
-  const linhas = page?.items ?? [];
-  const listaOk = listState === 'ok';
-  const listaVazia = listState === 'empty';
-
-  function limparFiltros() {
-    setQ('');
-    setInstituicao('');
-    setCampo('patientName');
-    setPeriodo('7d');
-    setOffset(0);
-  }
-
+  const change = (patch: Partial<WorklistState>) => { setRefresh(false); onStateChange({ ...state, ...patch, offset: 0 }); };
+  const filter = (key: SearchField | 'institutionName', value: string) => change({ filters: { ...state.filters, [key]: value } });
+  const reload = () => { setRefresh(true); onStateChange({ ...state, offset: 0 }); setRevision(value => value + 1); };
+  const busy = status === 'loading' || status === 'refreshing';
+  const options = modalities([...COMMON_MODALITIES, ...(page?.items.flatMap(item => item.modalities) ?? [])]);
+  const text = (value: string) => value.trim() || '—';
   return (
-    <div
-      style={{
-        padding: '32px 40px 48px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 20,
-        maxWidth: 1440,
-        minWidth: 1080,
-      }}
-    >
+    <div style={{ padding: '32px 40px 48px', display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 1520, minWidth: 1080 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
         <h1 style={{ margin: 0, fontSize: 40 }}>Exames</h1>
-        <span style={{ fontSize: 14, color: 'var(--color-neutral-700)' }}>
-          {listState === 'loading' ? 'Carregando…' : `${linhas.length} exame(s) nesta página`}
-          {atualizadoEm && ` · atualizado às ${atualizadoEm.toLocaleTimeString('pt-BR')}`}
+        <span role="status" style={{ fontSize: 14, color: 'var(--color-neutral-700)' }}>
+          {status === 'loading' ? 'Carregando…' : status === 'refreshing' ? 'Atualizando…' : status === 'ok' ? `${page?.items.length ?? 0} estudo(s) nesta página` : ''}
+          {updated && status === 'ok' && ` · atualizado às ${updated.toLocaleTimeString('pt-BR')}`}
         </span>
+        <button className="btn btn-secondary" style={{ marginLeft: 'auto' }} disabled={busy || !!validation} onClick={reload}><Icon name="rotate" /> Atualizar</button>
       </div>
-
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-        <span style={{ position: 'absolute', left: 18, color: 'var(--color-neutral-600)' }}>
-          <Icon name="search" size={20} />
-        </span>
-        <input
-          className="pacs-search"
-          value={q}
-          onChange={(event) => { setQ(event.target.value); setOffset(0); }}
-          maxLength={128}
-          placeholder={`${CAMPOS.find((item) => item.key === campo)?.label} — use * para busca parcial`}
-          aria-label="Pesquisar exames"
-          style={{
-            width: '100%',
-            height: 56,
-            padding: '0 120px 0 52px',
-            font: 'inherit',
-            fontSize: 17,
-            color: 'var(--color-text)',
-            background: 'var(--color-bg)',
-            border: '1px solid color-mix(in srgb, var(--color-text) 28%, transparent)',
-            borderRadius: 0,
-            outline: 'none',
-            caretColor: 'var(--color-accent)',
-          }}
-        />
-        {q && (
-          <button
-            type="button"
-            onClick={() => { setQ(''); setOffset(0); }}
-            title="Limpar"
-            aria-label="Limpar pesquisa"
-            style={{
-              position: 'absolute',
-              right: 62,
-              width: 32,
-              height: 32,
-              border: 0,
-              background: 'transparent',
-              color: 'var(--color-neutral-700)',
-              cursor: 'pointer',
-              display: 'grid',
-              placeItems: 'center',
-            }}
-          >
-            <Icon name="x" />
-          </button>
-        )}
-        <span
-          style={{
-            position: 'absolute',
-            right: 16,
-            fontFamily: 'ui-monospace,Menlo,monospace',
-            fontSize: 11,
-            color: 'var(--color-neutral-600)',
-            border: '1px solid var(--color-divider)',
-            padding: '2px 7px',
-          }}
-        >
-          /
-        </span>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <select className="input" aria-label="Tipo de busca" value={state.field} style={{ width: 220 }}
+          onChange={event => onStateChange({ ...state, field: event.target.value as SearchField })}>
+          {SEARCH_FIELDS.map(field => <option key={field.key} value={field.key}>{field.label}</option>)}
+        </select>
+        <input className="input pacs-search" style={{ flex: 1, height: 48 }} aria-label="Pesquisar exames" maxLength={128}
+          placeholder="Valor exato; use * para busca parcial" value={state.filters[state.field]} onChange={event => filter(state.field, event.target.value)} />
+        <button className="btn btn-secondary" aria-expanded={state.advanced} onClick={() => onStateChange({ ...state, advanced: !state.advanced })}>Filtros avançados</button>
       </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', border: '1px solid var(--color-divider)' }}>
-          {PERIODOS.map((item) => {
-            const ativo = periodo === item.key;
-            return (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => { setPeriodo(item.key); setOffset(0); }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  height: 38,
-                  padding: '0 16px',
-                  border: 0,
-                  borderRight: '1px solid var(--color-divider)',
-                  background: ativo ? 'var(--color-accent)' : 'transparent',
-                  color: ativo ? 'var(--color-bg)' : 'var(--color-text)',
-                  font: 'inherit',
-                  fontSize: 14,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                }}
-              >
-                {item.icon && <Icon name={item.icon} />}
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {periodo === 'per' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-            <input type="date" className="input" value={dataInicial} onChange={(event) => { setDataInicial(event.target.value); setOffset(0); }} style={{ width: 150, minHeight: 38 }} aria-label="Data inicial" />
-            <span style={{ color: 'var(--color-neutral-600)' }}>até</span>
-            <input type="date" className="input" value={dataFinal} onChange={(event) => { setDataFinal(event.target.value); setOffset(0); }} style={{ width: 150, minHeight: 38 }} aria-label="Data final" />
-          </div>
-        )}
-
-        <div style={{ width: 1, height: 24, background: 'var(--color-divider)', margin: '0 4px' }} />
-
-        <Dropdown
-          label={CAMPOS.find((item) => item.key === campo)?.label ?? 'Campo de pesquisa'}
-          aberto={menu}
-          onToggle={() => setMenu((atual) => !atual)}
-          largura={260}
-          opcoes={[...CAMPOS]}
-          selecionada={campo}
-          onEscolher={(key) => { setCampo(key as Campo); setOffset(0); setMenu(false); }}
-        />
-        <input
-          className="input"
-          aria-label="Instituição do estudo"
-          placeholder="Instituição (use * para busca parcial)"
-          value={instituicao}
-          maxLength={128}
-          onChange={(event) => { setInstituicao(event.target.value); setOffset(0); }}
-          style={{ width: 280, minHeight: 38 }}
-        />
-
-        <button
-          type="button"
-          className="btn btn-ghost"
-          onClick={limparFiltros}
-          style={{ marginLeft: 'auto', fontSize: 14 }}
-        >
-          Limpar filtros
-        </button>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {PERIODS.map(period => <button key={period.key} className={`btn ${state.period === period.key ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={state.period === period.key}
+          onClick={() => change({ period: period.key, ...(period.key === 'custom' ? {} : periodDates(period.key)) })}>{period.label}</button>)}
+        <span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>{dicomDate(state.dateFrom.replaceAll('-', ''))} — {dicomDate(state.dateTo.replaceAll('-', ''))}</span>
+        <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={() => { setRefresh(false); onStateChange(initialWorklist()); }}>Limpar filtros</button>
       </div>
-
-      <div className="blueprint" style={{ display: 'flex', flexDirection: 'column' }}>
+      {state.period === 'custom' && <div style={{ display: 'flex', gap: 16 }}>
+        <label>Data inicial <input type="date" className="input" aria-label="Data inicial" value={state.dateFrom} onChange={event => change({ dateFrom: event.target.value })} /></label>
+        <label>Data final <input type="date" className="input" aria-label="Data final" value={state.dateTo} onChange={event => change({ dateTo: event.target.value })} /></label>
+      </div>}
+      {state.advanced && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
+        {[...SEARCH_FIELDS, { key: 'institutionName' as const, label: 'Instituição' }].map(field => <label key={field.key} style={{ fontSize: 13 }}>{field.label}
+          <input className="input" style={{ width: '100%' }} aria-label={`Filtro ${field.label}`} maxLength={128} value={state.filters[field.key]} onChange={event => filter(field.key, event.target.value)} />
+        </label>)}
+        <p style={{ margin: 0, alignSelf: 'end', fontSize: 13 }}>Filtros combinados por E. Use * ou ? para padrões DICOM; nenhum curinga é acrescentado.</p>
+      </div>}
+      {!state.advanced && Object.entries(state.filters).some(([key, value]) => key !== state.field && value.trim()) &&
+        <span style={{ fontSize: 13 }}>Há filtros adicionais ativos. Abra “Filtros avançados” para revisá-los.</span>}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+        <label>Modalidade <input className="input" aria-label="Modalidade" list="worklist-modalities" placeholder="Todas" maxLength={16} style={{ width: 100 }} value={state.modality}
+          onChange={event => change({ modality: event.target.value.toUpperCase() })} /></label>
+        <datalist id="worklist-modalities">{options.map(value => <option key={value} value={value} />)}</datalist>
+        <label>Ordenação <select className="input" aria-label="Ordenação" value={state.sort} onChange={event => change({ sort: event.target.value as WorklistState['sort'] })}>
+          <option value="dateDesc">Mais recentes primeiro</option><option value="dateAsc">Mais antigos primeiro</option><option value="native">Ordem nativa do PACS</option>
+        </select></label>
+        <label style={{ marginLeft: 'auto' }}>Por página <select className="input" aria-label="Estudos por página" value={state.limit} onChange={event => change({ limit: Number(event.target.value) as 25 | 50 })}>
+          <option value={25}>25</option><option value={50}>50</option>
+        </select></label>
+      </div>
+      <div className="blueprint" aria-busy={busy} style={{ position: 'relative' }}>
         <BlueprintCorners />
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: COLUNAS,
-            alignItems: 'center',
-            height: 42,
-            padding: '0 20px',
-            gap: 16,
-            fontSize: 11,
-            letterSpacing: '.08em',
-            textTransform: 'uppercase',
-            color: 'var(--color-neutral-700)',
-            borderBottom: '1px solid var(--color-divider)',
-          }}
-        >
-          <span>Data / Hora</span>
-          <span>Paciente</span>
-          <span>Identificação</span>
-          <span>Mod.</span>
-          <span>Exame</span>
-          <span>Instituição</span>
-          <span style={{ textAlign: 'right' }}>Séries</span>
-          <span />
+        <div style={{ display: 'grid', gridTemplateColumns: COLUMNS, gap: 12, padding: '14px 16px', fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid var(--color-divider)' }}>
+          {['Data / Hora', 'Paciente', 'ID', 'Modalidade', 'Descrição', 'Accession', 'Instituição', 'Séries'].map(label => <span key={label}>{label}</span>)}
         </div>
-
-        {listaOk &&
-          linhas.map((exame) => (
-            <div
-              key={exame.orthancStudyId}
-              role="button"
-              tabIndex={0}
-              onClick={() => onAbrirExame(exame)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault(); onAbrirExame(exame);
-                }
-              }}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: COLUNAS,
-                alignItems: 'center',
-                minHeight: 62,
-                cursor: 'pointer',
-                padding: '0 20px',
-                gap: 16,
-                borderBottom: '1px solid color-mix(in srgb, var(--color-text) 8%, transparent)',
-                background: 'transparent',
-              }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
-                <span style={{ fontSize: 14, fontWeight: 600 }}>{exibirData(exame.studyDate)}</span>
-                <span
-                  style={{
-                    fontSize: 13,
-                    color: 'var(--color-neutral-700)',
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  {exibirHora(exame.studyTime)}
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3, minWidth: 0 }}>
-                <span
-                  style={{
-                    fontSize: 15.5,
-                    fontWeight: 600,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {exame.patientName.replaceAll('^', ' ') || '—'}
-                </span>
-                <span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>{exame.accessionNumber ? `Accession: ${exame.accessionNumber}` : '—'}</span>
-              </div>
-              <span
-                style={{
-                  fontFamily: 'ui-monospace,Menlo,monospace',
-                  fontSize: 13,
-                  color: 'var(--color-neutral-800)',
-                }}
-              >
-                {exame.patientId || '—'}
-              </span>
-              <span>
-                <span
-                  className="tag tag-accent"
-                  style={{ fontWeight: 600, letterSpacing: '.06em', padding: '2px 8px', whiteSpace: 'normal', overflowWrap: 'anywhere' }}
-                >
-                  {exame.modalities.join(' / ') || '—'}
-                </span>
-              </span>
-              <span
-                title={exame.studyDescription || '—'}
-                style={{ fontSize: 14.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-              >
-                {exame.studyDescription || '—'}
-              </span>
-              <span
-                style={{
-                  fontSize: 14,
-                  color: 'var(--color-neutral-800)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {exame.institutionName || '—'}
-              </span>
-              <span
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'flex-end',
-                  gap: 6,
-                  fontSize: 14,
-                  fontVariantNumeric: 'tabular-nums',
-                  color: 'var(--color-neutral-800)',
-                }}
-              >
-                {exame.seriesCount}
-                <span style={{ color: 'var(--color-neutral-500)' }}>
-                  <Icon name="image" />
-                </span>
-              </span>
-              <span style={{ fontSize: 13, color: 'var(--color-accent-700)' }}>Abrir ›</span>
-            </div>
-          ))}
-
-        {listState === 'loading' &&
-          ESQUELETOS.map((esqueleto, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: COLUNAS,
-                alignItems: 'center',
-                height: 62,
-                padding: '0 20px',
-                gap: 16,
-                borderBottom: '1px solid color-mix(in srgb, var(--color-text) 8%, transparent)',
-                animation: 'pacsShimmer 1.4s ease-in-out infinite',
-              }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ height: 10, width: 50, background: 'var(--color-neutral-300)' }} />
-                <div style={{ height: 8, width: 36, background: 'var(--color-neutral-200)' }} />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ height: 10, width: esqueleto.w1, background: 'var(--color-neutral-300)' }} />
-                <div style={{ height: 8, width: 90, background: 'var(--color-neutral-200)' }} />
-              </div>
-              <div style={{ height: 9, width: 64, background: 'var(--color-neutral-200)' }} />
-              <div style={{ height: 18, width: 30, background: 'var(--color-neutral-200)' }} />
-              <div style={{ height: 10, width: esqueleto.w2, background: 'var(--color-neutral-300)' }} />
-              <div style={{ height: 9, width: '70%', background: 'var(--color-neutral-200)' }} />
-              <div style={{ height: 9, width: 24, marginLeft: 'auto', background: 'var(--color-neutral-200)' }} />
-              <span />
-            </div>
-          ))}
-
-        {listaVazia && (
-          <div
-            style={{
-              padding: '72px 24px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 12,
-              textAlign: 'center',
-            }}
-          >
-            <span style={{ color: 'var(--color-accent)' }}>
-              <Icon name="searchX" size={32} />
-            </span>
-            <h3 style={{ margin: '4px 0 0', fontSize: 24 }}>Nenhum exame encontrado</h3>
-            <p
-              style={{
-                margin: 0,
-                maxWidth: 420,
-                fontSize: 14.5,
-                color: 'var(--color-neutral-700)',
-                textWrap: 'pretty',
-              }}
-            >
-              Nenhum resultado para os filtros atuais. Verifique a grafia do nome ou amplie o período
-              da pesquisa.
-            </p>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={limparFiltros}
-              style={{ marginTop: 8, height: 40, padding: '0 18px', fontSize: 15 }}
-            >
-              Limpar filtros
-            </button>
-          </div>
-        )}
-
-        {listState === 'error' && (
-          <div
-            style={{
-              padding: '72px 24px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 12,
-              textAlign: 'center',
-            }}
-          >
-            <span style={{ color: 'oklch(0.5 0.14 25)' }}>
-              <Icon name="alert" size={32} />
-            </span>
-            <h3 style={{ margin: '4px 0 0', fontSize: 24 }}>Não foi possível carregar os exames</h3>
-            <p
-              style={{
-                margin: 0,
-                maxWidth: 440,
-                fontSize: 14.5,
-                color: 'var(--color-neutral-700)',
-                textWrap: 'pretty',
-              }}
-            >
-              {erro}
-            </p>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => setTentativa((value) => value + 1)}
-              style={{ marginTop: 8, height: 40, padding: '0 18px', fontSize: 15, gap: 8 }}
-            >
-              <Icon name="rotate" />
-              Tentar novamente
-            </button>
-          </div>
-        )}
+        {page?.items.map(study => <div key={study.orthancStudyId} role="button" tabIndex={busy ? -1 : 0} aria-disabled={busy} className="pacs-hover-accent" aria-label="Abrir estudo"
+          onClick={() => { if (!busy) onAbrirExame(study); }}
+          onKeyDown={event => { if (event.target === event.currentTarget && !busy && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onAbrirExame(study); } }}
+          style={{ display: 'grid', gridTemplateColumns: COLUMNS, gap: 12, alignItems: 'center', padding: '14px 16px', minHeight: 62, fontSize: 14, cursor: busy ? 'wait' : 'pointer', borderBottom: '1px solid var(--color-divider)', opacity: busy ? .65 : 1 }}>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{dicomDate(study.studyDate)}<br /><small>{dicomTime(study.studyTime)}</small></span>
+          <strong style={{ overflowWrap: 'anywhere' }}>{text(study.patientName.replaceAll('^', ' '))}</strong>
+          <span style={{ overflowWrap: 'anywhere' }}>{text(study.patientId)}</span>
+          <span className="tag tag-accent">{modalities(study.modalities).join(' / ') || '—'}</span>
+          <span style={{ overflowWrap: 'anywhere' }}>{text(study.studyDescription)}</span>
+          <span style={{ overflowWrap: 'anywhere' }}>{text(study.accessionNumber)}</span>
+          <span style={{ overflowWrap: 'anywhere' }}>{text(study.institutionName)}</span><span>{study.seriesCount}</span>
+        </div>)}
+        {status === 'loading' && <div style={{ padding: 48, textAlign: 'center' }}>Consultando exames…</div>}
+        {status === 'ok' && page?.items.length === 0 && <div style={{ padding: 48, textAlign: 'center' }}>Nenhum estudo encontrado para os filtros selecionados.</div>}
+        {status === 'error' && <div role="alert" style={{ padding: 40, textAlign: 'center' }}><p>{error}</p>
+          {!validation && <button className="btn btn-secondary" onClick={reload}>Tentar novamente</button>}</div>}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 14 }}>
-        <button className="btn btn-secondary" type="button" disabled={listState === 'loading' || offset === 0}
-          onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}>Anterior</button>
-        <span>Página {Math.floor(offset / PAGE_SIZE) + 1} · até {PAGE_SIZE} estudos</span>
-        <button className="btn btn-secondary" type="button" disabled={listState === 'loading' || page?.nextOffset == null}
-          onClick={() => { if (page?.nextOffset != null) setOffset(page.nextOffset); }}>Próxima</button>
+        <button className="btn btn-secondary" disabled={busy || !!validation || state.offset === 0} onClick={() => { setRefresh(false); onStateChange({ ...state, offset: Math.max(0, state.offset - state.limit) }); }}>Anterior</button>
+        <span>Página {Math.floor(state.offset / state.limit) + 1} · até {state.limit} estudos</span>
+        <button className="btn btn-secondary" disabled={busy || status === 'error' || page?.nextOffset == null} onClick={() => { if (page?.nextOffset != null) { setRefresh(false); onStateChange({ ...state, offset: page.nextOffset }); } }}>Próxima</button>
+        {status === 'ok' && page && !page.hasMore && <span>Fim dos resultados.</span>}
         {page?.hasMore && page.nextOffset === null && <span>Refine o período ou os filtros para continuar.</span>}
       </div>
     </div>

@@ -25,6 +25,8 @@ test('Worklist envia filtros codificados, paginação, sessão e cancelamento', 
     assert.equal(url.searchParams.get('dateTo'), '2026-09-26');
     assert.equal(url.searchParams.get('offset'), '25');
     assert.equal(url.searchParams.get('limit'), '25');
+    assert.equal(url.searchParams.get('modality'), 'CT');
+    assert.equal(url.searchParams.get('sort'), 'dateAsc');
     assert.equal(options.method, 'GET');
     assert.equal(options.credentials, 'same-origin');
     assert.equal(options.signal, controller.signal);
@@ -32,7 +34,7 @@ test('Worklist envia filtros codificados, paginação, sessão e cancelamento', 
     assert.equal(options.headers.Authorization, undefined);
     return Response.json(page);
   });
-  assert.deepEqual(await api.getStudies({ limit: 25, offset: 25, dateFrom: '2026-09-01', dateTo: '2026-09-26',
+  assert.deepEqual(await api.getStudies({ modality: 'CT', sort: 'dateAsc', limit: 25, offset: 25, dateFrom: '2026-09-01', dateTo: '2026-09-26',
     patientName: 'FICTICIO^A & B*', patientId: 'ID-FICTICIO', accessionNumber: 'ACC-FICTICIO', institutionName: 'Instituição fictícia',
   }, controller.signal), page);
 });

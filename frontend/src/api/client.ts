@@ -180,6 +180,8 @@ export type Study = {
 };
 
 export type StudyQuery = {
+  modality?: string;
+  sort?: 'dateDesc' | 'dateAsc' | 'native';
   limit?: number;
   offset?: number;
   dateFrom?: string;

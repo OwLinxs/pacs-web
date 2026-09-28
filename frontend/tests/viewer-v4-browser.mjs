@@ -28,6 +28,7 @@ export async function testViewerV4({ evaluate, command, key, choose, pause, unti
 
   await key('ArrowRight');await wait(0,'Imagem 2 / 3');
   await button('1x2');await wait(0,'Imagem 2 / 3');await wait(1,'Imagem 1 / 2');
+  await activate(1); assert.equal(await pressed('Invert'), 'false', 'auto-layout inicia Invert OFF'); await activate(0);
   for (let repeat = 0; repeat < 3; repeat++) {
   await button('1x1'); await button('1x2'); await wait(1,'Imagem 1 / 2'); await pause(120);
   const square=await evaluate(`(()=>{const c=document.querySelector('[data-viewport="image-0"] canvas'),d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let minX=c.width,minY=c.height,maxX=0,maxY=0;for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){if(d[4*(y*c.width+x)]>8){minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}}return {width:maxX-minX,height:maxY-minY}})()`);

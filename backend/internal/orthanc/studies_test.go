@@ -73,7 +73,7 @@ func TestFindStudiesPageAndModalities(t *testing.T) {
 	defer server.Close()
 	cfg := studiesConfig()
 	cfg.Username, cfg.Credential = "ficticio", "credencial-ficticia"
-	page, err := simulatedClient(t, server).FindStudies(context.Background(), cfg, studies.Query{
+	page, err := simulatedClient(t, server).FindStudies(context.Background(), cfg, studies.Query{Sort: "native",
 		Limit: 2, Offset: 2, DateFrom: "2026-09-01", DateTo: "2026-09-26", PatientName: "FICTICIO*", PatientID: "SYNTH-1", AccessionNumber: "ACC-SYNTH", StudyDescription: "Exame*", InstitutionName: "Instituicao Ficticia",
 	})
 	if err != nil {
@@ -131,7 +131,7 @@ func TestFindStudiesFailuresAndEmpty(t *testing.T) {
 				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer server.Close()
-			page, err := simulatedClient(t, server).FindStudies(context.Background(), studiesConfig(), studies.Query{Limit: 1})
+			page, err := simulatedClient(t, server).FindStudies(context.Background(), studiesConfig(), studies.Query{Sort: "native", Limit: 1})
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("erro=%v esperado=%v", err, tc.want)
 			}
@@ -163,13 +163,13 @@ func TestFindStudiesTimeoutAndCancellation(t *testing.T) {
 			cfg := studiesConfig()
 			cfg.Timeout = 40 * time.Millisecond
 			client := simulatedClient(t, server)
-			_, err := client.FindStudies(context.Background(), cfg, studies.Query{Limit: 1})
+			_, err := client.FindStudies(context.Background(), cfg, studies.Query{Sort: "native", Limit: 1})
 			if !errors.Is(err, Timeout) {
 				t.Fatalf("erro=%v", err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
-			_, err = client.FindStudies(ctx, cfg, studies.Query{Limit: 1})
+			_, err = client.FindStudies(ctx, cfg, studies.Query{Sort: "native", Limit: 1})
 			if !errors.Is(err, Canceled) {
 				t.Fatalf("cancelamento=%v", err)
 			}
@@ -196,7 +196,7 @@ func TestFindStudiesSeriesValidation(t *testing.T) {
 				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer server.Close()
-			page, err := simulatedClient(t, server).FindStudies(context.Background(), studiesConfig(), studies.Query{Limit: 1})
+			page, err := simulatedClient(t, server).FindStudies(context.Background(), studiesConfig(), studies.Query{Sort: "native", Limit: 1})
 			if !errors.Is(err, tc.want) {
 				t.Fatal(err)
 			}
@@ -217,7 +217,7 @@ func TestFindStudiesLimitsBeforeNetwork(t *testing.T) {
 	for _, base := range []string{"http://127.0.0.1", "http://169.254.169.254", "http://[::1]"} {
 		cfg := studiesConfig()
 		cfg.BaseURL = base
-		if _, err := client.FindStudies(context.Background(), cfg, studies.Query{Limit: 1}); !errors.Is(err, BlockedTarget) {
+		if _, err := client.FindStudies(context.Background(), cfg, studies.Query{Sort: "native", Limit: 1}); !errors.Is(err, BlockedTarget) {
 			t.Fatal(err)
 		}
 	}
@@ -248,7 +248,7 @@ func TestFindStudiesBoundedConcurrency(t *testing.T) {
 		_ = json.NewEncoder(w).Encode([]map[string]any{{"ID": fakeID(number + 100), "Type": "Series", "ParentStudy": id}})
 	}))
 	defer server.Close()
-	page, err := simulatedClient(t, server).FindStudies(context.Background(), studiesConfig(), studies.Query{Limit: 8, Offset: 10000})
+	page, err := simulatedClient(t, server).FindStudies(context.Background(), studiesConfig(), studies.Query{Sort: "native", Limit: 8, Offset: 10000})
 	if err != nil {
 		t.Fatal(err)
 	}

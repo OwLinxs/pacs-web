@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/pmfb-saude/pacs-web/backend/internal/studies"
 )
+
+const UnsupportedQuery Failure = "unsupported_studies_query"
 
 const maxStudyBytes = 4 << 20
 const maxSeriesPerStudy = 2000
@@ -25,9 +28,12 @@ type expandedStudy struct {
 	Series               []string
 }
 
-// FindStudies realiza somente POST /tools/find (consulta) e GET das séries
+// FindStudies consulta capacidades, POST /tools/find (leitura) e as séries
 // dos estudos da página. O mesmo timeout limita a operação inteira.
 func (c *Client) FindStudies(ctx context.Context, cfg Config, query studies.Query) (studies.Page, error) {
+	if query.Sort == "" {
+		query.Sort = "dateDesc"
+	}
 	if query.Validate() != nil {
 		return studies.Page{}, InvalidTarget
 	}
@@ -38,7 +44,16 @@ func (c *Client) FindStudies(ctx context.Context, cfg Config, query studies.Quer
 	defer s.client.CloseIdleConnections()
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
+	// Não permite que uma versão antiga ignore OrderBy ou pagine modalidade incorretamente.
+	if (query.Sort != "" && query.Sort != "native") || query.Modality != "" {
+		if err := s.checkStudiesCapabilities(ctx, query); err != nil {
+			return studies.Page{}, err
+		}
+	}
 	filters := map[string]string{}
+	if query.Modality != "" {
+		filters["ModalitiesInStudy"] = query.Modality
+	}
 	for tag, value := range map[string]string{
 		"PatientName": query.PatientName, "PatientID": query.PatientID,
 		"AccessionNumber": query.AccessionNumber, "StudyDescription": query.StudyDescription,
@@ -51,13 +66,20 @@ func (c *Client) FindStudies(ctx context.Context, cfg Config, query studies.Quer
 	if query.DateFrom != "" || query.DateTo != "" {
 		filters["StudyDate"] = strings.ReplaceAll(query.DateFrom, "-", "") + "-" + strings.ReplaceAll(query.DateTo, "-", "")
 	}
-	payload, err := json.Marshal(struct {
-		Level         string
-		Expand        bool
-		Limit, Since  int
-		CaseSensitive bool
-		Query         map[string]string
-	}{"Study", true, query.Limit + 1, query.Offset, false, filters})
+	payloadQuery := map[string]any{"Level": "Study", "Expand": true, "Limit": query.Limit + 1, "Since": query.Offset, "CaseSensitive": false, "Query": filters}
+	if query.Sort == "dateDesc" || query.Sort == "dateAsc" {
+		direction := "DESC"
+		if query.Sort == "dateAsc" {
+			direction = "ASC"
+		}
+		// Desempate global pelo UID; nenhuma ordenação local da página.
+		payloadQuery["OrderBy"] = []map[string]string{
+			{"Type": "DicomTag", "Key": "StudyDate", "Direction": direction},
+			{"Type": "DicomTag", "Key": "StudyTime", "Direction": direction},
+			{"Type": "DicomTag", "Key": "StudyInstanceUID", "Direction": "ASC"},
+		}
+	}
+	payload, err := json.Marshal(payloadQuery)
 	if err != nil {
 		return studies.Page{}, InvalidTarget
 	}
@@ -168,4 +190,49 @@ func (s *session) studyModalities(ctx context.Context, study expandedStudy) ([]s
 	}
 	sort.Strings(modalities)
 	return modalities, nil
+}
+
+// Capacidades lidas por consulta, dentro do mesmo timeout e transporte seguro.
+// Não mantém cache de configuração/credencial nem devolve /system ao browser.
+func (s *session) checkStudiesCapabilities(ctx context.Context, query studies.Query) error {
+	body, err := s.read(ctx, http.MethodGet, "/system", nil, maxSystemBytes)
+	if err != nil {
+		return err
+	}
+	var info struct {
+		Version      string
+		Capabilities map[string]bool
+	}
+	if json.Unmarshal(body, &info) != nil || info.Version == "" {
+		return InvalidResponse
+	}
+	if !info.Capabilities["HasExtendedFind"] {
+		return UnsupportedQuery
+	}
+	// 1.12.6 corrigiu ModalitiesInStudy + paginação no ExtendedFind.
+	if query.Modality != "" && !versionAtLeast(info.Version, [3]int{1, 12, 6}) {
+		return UnsupportedQuery
+	}
+	return nil
+}
+
+func versionAtLeast(version string, minimum [3]int) bool {
+	parts := strings.Split(version, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	var values [3]int
+	for i, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 0 {
+			return false
+		}
+		values[i] = n
+	}
+	for i, n := range values {
+		if n != minimum[i] {
+			return n > minimum[i]
+		}
+	}
+	return true
 }

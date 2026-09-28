@@ -19,6 +19,7 @@ const instancesPath = `${studyPath}/${series}/instances`;
 const dicomPath = `${instancesPath}/${instance}/dicom`;
 const calls = [];
 let failImage = false;
+let monochrome1 = false;
 let expireImage = false;
 let expireThumbnail = false;
 const server = createServer(async (req, res) => {
@@ -42,7 +43,7 @@ const server = createServer(async (req, res) => {
   if (path === `${studyPath}/${id(7)}/instances`) { await new Promise((resolve) => setTimeout(resolve, 300)); return json({ items: [{ orthancInstanceId: id(70), number: 1 }] }); }
   if (path.endsWith(`/${id(30)}/dicom`) && (failImage || expireImage)) { res.statusCode = expireImage ? 401 : 502; return json({ error: { code: 'FIXTURE_FAILURE', message: 'Falha sintética.' } }); }
   if (expireThumbnail && path.endsWith(`/${id(40)}/dicom`)) { res.statusCode = 401; return json({ error: { code: 'SESSION_EXPIRED', message: 'Sessão expirada.' } }); }
-  if (path.endsWith('/dicom') && path.startsWith(studyPath)) { res.setHeader('Content-Type', 'application/dicom'); return res.end(syntheticDICOM({ calibrated: !path.includes(`/${id(4)}/`), width: path.includes(`/${id(7)}/`) ? 48 : 32, height: path.includes(`/${id(7)}/`) ? 24 : 32 })); }
+  if (path.endsWith('/dicom') && path.startsWith(studyPath)) { res.setHeader('Content-Type', 'application/dicom'); return res.end(syntheticDICOM({ monochrome1, calibrated: !path.includes(`/${id(4)}/`), width: path.includes(`/${id(7)}/`) ? 48 : 32, height: path.includes(`/${id(7)}/`) ? 24 : 32 })); }
   if (path.startsWith('/api/')) { res.statusCode = 404; return json({ error: { code: 'NOT_FOUND', message: 'Recurso fictício ausente.' } }); }
   try {
     const asset = path.startsWith('/assets/') && /^\/assets\/[\w.-]+$/.test(path) ? path.slice(1) : 'index.html';
@@ -117,6 +118,7 @@ try {
   const files = () => calls.filter((path) => path.endsWith('/dicom'));
   assert.ok(files().every(path => !path.includes(`/${id(30)}/`) && !path.includes(`/${id(31)}/`) && !path.includes(`/${id(41)}/`)), 'miniaturas usam somente primeira instância');
   await evaluate("window.fixtureEngine = document.querySelector('main canvas')");
+  assert.equal(await evaluate("document.querySelector('[aria-label=Invert]').getAttribute('aria-pressed')"), 'false', 'primeiro viewport inicia Invert OFF');
   await testViewerTools({ evaluate, command, key, count, choose, pause, until });
   const loadedAfterTools = files().filter(path => path.endsWith(`/${id(30)}/dicom`)).length;
   // Reproduz perda de foco do main que não era coberta no V1.
@@ -180,6 +182,27 @@ try {
   await evaluate("document.querySelector('[role=button]').click()");
   await count('Sua sessão expirou por segurança.');
   const stoppedThumbnailRequests=calls.length; await pause(400); assert.equal(calls.length,stoppedThumbnailRequests,'expiração de thumbnail encerra operações');
+  // Regressão isolada: MONOCHROME1 possui inversão nativa no loader.
+  expireThumbnail = false; monochrome1 = true;
+  await command('Page.navigate', { url: origin });
+  await until(()=>evaluate("!!document.querySelector('[role=button]')"));
+  await evaluate("document.querySelector('[role=button]').click()");
+  await count('Imagem 1 / 3');
+  const invertState=()=>evaluate("document.querySelector('[aria-label=Invert]').getAttribute('aria-pressed')");
+  const press=label=>evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.getAttribute('aria-label')===${JSON.stringify(label)} || b.textContent.trim()===${JSON.stringify(label)}).click()`);
+  assert.equal(await invertState(),'false','MONOCHROME1: estudo inicia OFF');
+  await press('Invert');assert.equal(await invertState(),'true','usuário pode ativar Invert');
+  await choose(1);await count('Imagem 1 / 2');assert.equal(await invertState(),'false','nova série inicia OFF');
+  await press('Invert');await press('Reset');assert.equal(await invertState(),'false','Reset retorna OFF');
+  await press('1x2');await until(()=>evaluate("document.querySelector('[data-viewport=\"image-1\"]').textContent.includes('Imagem 1 / 3')"));
+  const activePoint=await evaluate("(()=>{const r=document.querySelector('[data-viewport=\"image-1\"]').getBoundingClientRect();return {x:r.x+8,y:r.y+8}})()");
+  await command('Input.dispatchMouseEvent',{type:'mousePressed',...activePoint,button:'left',buttons:1,clickCount:1});
+  await command('Input.dispatchMouseEvent',{type:'mouseReleased',...activePoint,button:'left',buttons:0,clickCount:1});
+  assert.equal(await invertState(),'false','auto-layout/novo viewport inicia OFF');
+  await press('Invert');await choose(1);
+  await until(()=>evaluate("document.querySelector('[data-viewport=\"image-1\"]').textContent.includes('Imagem 1 / 2')"));
+  assert.equal(await invertState(),'false','série em outro viewport inicia OFF');
+  console.log('PASS: Invert OFF inicial/Reset — MONOCHROME1, troca de série, auto-layout, outro viewport e ativação manual.');
   assert.equal(failures.length, 0);
   console.log(`PASS: Viewer V4 + regressão V2/V3 — stack sob demanda, setas/scroll, contador, troca de série, vazio, falha e seleção obsoleta. Screenshot: ${output}`);
 } finally {

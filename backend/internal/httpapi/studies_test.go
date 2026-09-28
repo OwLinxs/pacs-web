@@ -88,7 +88,7 @@ func TestStudiesContractFiltersAndPrivacy(t *testing.T) {
 	seedStudiesSettings(t, c)
 	loginStudies(t, c, user.RoleMedico)
 	before := len(c.auditoria.Entradas())
-	params := url.Values{"limit": {"2"}, "offset": {"4"}, "dateFrom": {"2026-09-01"}, "dateTo": {"2026-09-26"}, "patientName": {"FICTICIO^PRIVACIDADE"}, "patientId": {"ID-FICTICIO-PRIVACIDADE"}, "accessionNumber": {"ACC-FICTICIO"}, "studyDescription": {"DESCRICAO-FICTICIA"}, "institutionName": {"INSTITUICAO-FICTICIA"}}
+	params := url.Values{"sort": {"dateAsc"}, "modality": {"CT"}, "limit": {"2"}, "offset": {"4"}, "dateFrom": {"2026-09-01"}, "dateTo": {"2026-09-26"}, "patientName": {"FICTICIO^PRIVACIDADE"}, "patientId": {"ID-FICTICIO-PRIVACIDADE"}, "accessionNumber": {"ACC-FICTICIO"}, "studyDescription": {"DESCRICAO-FICTICIA"}, "institutionName": {"INSTITUICAO-FICTICIA"}}
 	r := c.requisitar(t, "GET", "/api/studies?"+params.Encode(), nil)
 	if r.StatusCode != 200 {
 		t.Fatal(r.StatusCode)
@@ -98,7 +98,7 @@ func TestStudiesContractFiltersAndPrivacy(t *testing.T) {
 	if json.Unmarshal([]byte(body), &page) != nil || len(page.Items) != 1 || page.Offset != 4 || page.Limit != 2 || page.NextOffset == nil || *page.NextOffset != 6 || !page.HasMore {
 		t.Fatal("contrato inválido")
 	}
-	if called.Limit != 2 || called.Offset != 4 || called.DateFrom != "2026-09-01" || called.DateTo != "2026-09-26" || called.PatientName != "FICTICIO^PRIVACIDADE" || called.PatientID != "ID-FICTICIO-PRIVACIDADE" || called.AccessionNumber != "ACC-FICTICIO" || called.StudyDescription != "DESCRICAO-FICTICIA" || called.InstitutionName != "INSTITUICAO-FICTICIA" {
+	if called.Sort != "dateAsc" || called.Modality != "CT" || called.Limit != 2 || called.Offset != 4 || called.DateFrom != "2026-09-01" || called.DateTo != "2026-09-26" || called.PatientName != "FICTICIO^PRIVACIDADE" || called.PatientID != "ID-FICTICIO-PRIVACIDADE" || called.AccessionNumber != "ACC-FICTICIO" || called.StudyDescription != "DESCRICAO-FICTICIA" || called.InstitutionName != "INSTITUICAO-FICTICIA" {
 		t.Fatal("filtros incorretos")
 	}
 	for _, value := range []string{"FICTICIO^PRIVACIDADE", "ID-FICTICIO-PRIVACIDADE", "2.25.987654321", "ACC-FICTICIO", "DESCRICAO-FICTICIA", "INSTITUICAO-FICTICIA", "credencial-apenas-ficticia", "orthanc.test"} {
@@ -124,7 +124,7 @@ func TestStudiesQueryValidation(t *testing.T) {
 	})})
 	seedStudiesSettings(t, c)
 	loginStudies(t, c, user.RoleMedico)
-	for _, query := range []string{"limit=0", "limit=-1", "limit=51", "limit=abc", "limit=1&limit=2", "offset=-1", "offset=10001", "offset=99999999999999999999999", "dateFrom=2026-02-30", "dateFrom=2026-10-01&dateTo=2026-01-01", "dateTo=2026-9-1", "url=http://outro.invalid", "patientName=%zz", "patientName=" + strings.Repeat("a", 129), "patientId=a%5Cb", "patientName=a%00b", "patientId=%FF", "patientName=" + strings.Repeat("a", 4097)} {
+	for _, query := range []string{"limit=0", "limit=-1", "limit=51", "limit=abc", "limit=1&limit=2", "offset=-1", "offset=10001", "offset=99999999999999999999999", "dateFrom=2026-02-30", "dateFrom=2026-10-01&dateTo=2026-01-01", "dateTo=2026-9-1", "url=http://outro.invalid", "sort=patientName", "sort=dateDesc&sort=dateAsc", "modality=CT*", "modality=CT%5CMR", "modality=" + strings.Repeat("A", 17), "patientName=%zz", "patientName=" + strings.Repeat("a", 129), "patientId=a%5Cb", "patientName=a%00b", "patientId=%FF", "patientName=" + strings.Repeat("a", 4097)} {
 		t.Run(query[:min(len(query), 50)], func(t *testing.T) {
 			r := c.requisitar(t, "GET", "/api/studies?"+query, nil)
 			defer r.Body.Close()
@@ -136,7 +136,7 @@ func TestStudiesQueryValidation(t *testing.T) {
 	if calls.Load() != 0 {
 		t.Fatal("entrada inválida consultou Orthanc")
 	}
-	for _, query := range []string{"", "limit=50&offset=10000", "dateFrom=2026-09-01", "dateTo=2026-09-26", "patientName=FICTICIO*"} {
+	for _, query := range []string{"", "limit=50&offset=10000", "dateFrom=2026-09-01", "dateTo=2026-09-26", "patientName=FICTICIO*", "sort=dateAsc&modality=SR", "sort=native", "modality=NEW_CODE"} {
 		r := c.requisitar(t, "GET", "/api/studies?"+query, nil)
 		if r.StatusCode != 200 {
 			t.Fatal(r.StatusCode)
@@ -158,6 +158,7 @@ func TestStudiesFailuresSanitized(t *testing.T) {
 		want int
 		code string
 	}{
+		{"capacidades", orthanc.UnsupportedQuery, 422, "PACS_QUERY_UNSUPPORTED"},
 		{"timeout", orthanc.Timeout, 504, "PACS_TIMEOUT"}, {"indisponível", orthanc.Refused, 502, "PACS_UNAVAILABLE"},
 		{"credencial recusada", orthanc.Unauthorized, 502, "PACS_UNAVAILABLE"}, {"resposta inválida", orthanc.InvalidResponse, 502, "PACS_INVALID_RESPONSE"},
 		{"erro com dado clínico", errors.New("FICTICIO^PRIVACIDADE ID-FICTICIO 2.25.987654321 credencial-apenas-ficticia"), 502, "PACS_UNAVAILABLE"},
