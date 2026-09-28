@@ -6,6 +6,7 @@ import { initialSeries, loadSeriesStack, navigationDelta } from '../viewer/selec
 import type { ViewerSession } from '../viewer/cornerstone';
 import { ViewportPane, type PaneControls, type PaneState } from '../viewer/ViewportPane';
 import { SeriesThumbnail } from '../viewer/SeriesThumbnail';
+import { fillLayout, type LayoutCount, type SeriesSlot } from '../viewer/layout';
 import { ViewerToolbar } from '../viewer/ViewerToolbar';
 
 const DARK = 'color-mix(in srgb, var(--color-neutral-900) 40%, black)';
@@ -29,16 +30,18 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
   const { user } = useSession();
   const [series, setSeries] = useState<ViewerSeries[]>([]);
   const [listState, setListState] = useState('loading');
-  const [layout, setLayout] = useState<1 | 2 | 4>(1);
+  const [layout, setLayout] = useState<LayoutCount>(1);
   const [active, setActive] = useState(0);
   const activeRef = useRef(0); activeRef.current = active;
-  const [assigned, setAssigned] = useState<(ViewerSeries | null)[]>([null, null, null, null]);
+  const [assigned, setAssigned] = useState<SeriesSlot[]>([]);
+  const [maximized, setMaximized] = useState<number | null>(null);
+  const maximizedRef = useRef(maximized); maximizedRef.current = maximized;
   const [states, setStates] = useState<Record<number, PaneState>>({});
   const [fps, setFps] = useState(10);
   const controls = useRef<(PaneControls | null)[]>([]);
   const [runtime, setRuntime] = useState<{ session: Promise<ViewerSession>; signal: AbortSignal; load: (id: string) => Promise<string[]>; expired: () => void } | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const selected = assigned[active];
+  const selected = assigned[active]?.series;
   const state = states[active];
   const register = useRef([0, 1, 2, 3].map((index) => (value: PaneControls | null) => { controls.current[index] = value; }));
   const report = useRef([0, 1, 2, 3].map((index) => (value: PaneState) => setStates((before) => ({ ...before, [index]: value }))));
@@ -66,7 +69,7 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
     setListState('loading');
     void api.getViewerSeries(studyId, lifetime.signal).then(({ items }) => {
       if (lifetime.signal.aborted) return;
-      setSeries(items); setAssigned([initialSeries(items), null, null, null]); setListState(items.length ? 'ready' : 'empty');
+      setSeries(items); setAssigned(fillLayout([{ series: initialSeries(items), manual: false }], items, 1, 1)); setListState(items.length ? 'ready' : 'empty');
     }).catch((error) => {
       if (lifetime.signal.aborted) return;
       if (error instanceof ApiError && error.status === 401) expired(); else setListState('error');
@@ -78,6 +81,9 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
       const target = event.target;
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
         (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]')))) return;
+      if (event.key === 'Escape' && maximizedRef.current !== null) { event.preventDefault(); controls.current.forEach((pane) => pane?.prepareResize()); setMaximized(null); }
+      if (!event.repeat && event.key.toLowerCase() === 'r') { event.preventDefault(); controls.current[activeRef.current]?.rotate(90); }
+      if (!event.repeat && event.key.toLowerCase() === 'f') { event.preventDefault(); controls.current[activeRef.current]?.fit(); }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); controls.current[activeRef.current]?.deleteSelected(); }
     };
     window.addEventListener('keydown', key, true);
@@ -112,14 +118,17 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
           </button>
         </div>
       </header>
-      <ViewerToolbar selected={state?.tool ?? 'WindowLevel'} inverted={state?.inverted ?? false} disabled={!state?.ready}
+      <ViewerToolbar selected={state?.tool ?? 'WindowLevel'} inverted={state?.inverted ?? false} flipHorizontal={state?.flipHorizontal ?? false} flipVertical={state?.flipVertical ?? false} disabled={!state?.ready}
         onSelect={(value) => controls.current[active]?.selectTool(value)}
+        onRotate={(delta) => controls.current[active]?.rotate(delta)} onFlip={(axis) => controls.current[active]?.flip(axis)} onFit={() => controls.current[active]?.fit()}
         onInvert={() => controls.current[active]?.invert()} onReset={() => controls.current[active]?.reset()} />
       <div role="toolbar" aria-label="Layout e reprodução" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 12px', background: HEADER, fontSize: 12 }}>
-        {([1, 2, 4] as const).map((count) => <button type="button" style={{ ...ACTION, borderColor: layout === count ? 'var(--color-accent-400)' : '#424a55' }} key={count} aria-pressed={layout === count} onClick={() => {
+        {([1, 2, 4] as const).map((count) => <button type="button" style={{ ...ACTION, borderColor: layout === count ? 'var(--color-accent-400)' : '#424a55' }} key={count} disabled={listState !== 'ready'} aria-pressed={layout === count} onClick={() => {
+          controls.current.forEach((pane) => pane?.prepareResize());
           for (let i = count; i < 4; i++) controls.current[i]?.pause();
           if (active >= count) activate(0);
-          setAssigned((before) => before.map((item, index) => index < count ? item : null));
+          setMaximized(null);
+          setAssigned((before) => fillLayout(before, series, count, layout));
           setLayout(count);
         }}>{count === 1 ? '1x1' : count === 2 ? '1x2' : '2x2'}</button>)}
         <span>Viewport {active + 1}</span>
@@ -131,7 +140,7 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
         <aside style={{ width: 160, flex: 'none', overflowY: 'auto', padding: 16, borderRight: `1px solid ${LINE}`, background: PANEL }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 20 }}><span>Séries</span><span>{series.length}</span></div>
           {series.map((item) => (
-            <button type="button" aria-pressed={item.orthancSeriesId === selected?.orthancSeriesId} key={item.orthancSeriesId} onClick={() => { controls.current[active]?.pause(); setAssigned((before) => before.map((value, index) => index === active ? item : value)); }} style={{ display: 'block', width: '100%', textAlign: 'left', font: 'inherit', cursor: 'pointer', background: item.orthancSeriesId === selected?.orthancSeriesId ? 'rgba(255,255,255,.06)' : 'transparent', border: 0, padding: '12px 0', borderBottom: `1px solid ${LINE}`, color: item.orthancSeriesId === selected?.orthancSeriesId ? 'var(--color-accent-300)' : 'var(--color-neutral-500)', fontSize: 12, overflowWrap: 'anywhere' }}>
+            <button type="button" aria-pressed={item.orthancSeriesId === selected?.orthancSeriesId} key={item.orthancSeriesId} onClick={() => { controls.current[active]?.pause(); setAssigned((before) => before.map((value, index) => index === active ? { series: item, manual: true } : value)); }} style={{ display: 'block', width: '100%', textAlign: 'left', font: 'inherit', cursor: 'pointer', background: item.orthancSeriesId === selected?.orthancSeriesId ? 'rgba(255,255,255,.06)' : 'transparent', border: 0, padding: '12px 0', borderBottom: `1px solid ${LINE}`, color: item.orthancSeriesId === selected?.orthancSeriesId ? 'var(--color-accent-300)' : 'var(--color-neutral-500)', fontSize: 12, overflowWrap: 'anywhere' }}>
               {runtime && <SeriesThumbnail seriesId={item.orthancSeriesId} count={item.instanceCount} {...runtime} />}
               <div>{item.description || 'Série sem descrição'}</div>
               <div style={{ marginTop: 6 }}>S{item.number || '—'} · {item.modality || '—'} · {item.instanceCount} imagem(ns)</div>
@@ -142,7 +151,10 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
           {listState !== 'ready' ? <div role={listState === 'error' ? 'alert' : 'status'} style={{ padding: 32 }}>
             {listState === 'loading' ? 'Carregando séries…' : listState === 'empty' ? 'Estudo sem séries' : 'Não foi possível consultar as séries.'}
             {listState === 'error' && <button type="button" onClick={() => setAttempt((value) => value + 1)}>Tentar novamente</button>}
-          </div> : runtime && Array.from({ length: layout }, (_, index) => <ViewportPane key={`${attempt}-${index}`} id={`image-${index}`} active={index === active} series={assigned[index] ?? null}
+          </div> : runtime && Array.from({ length: layout }, (_, index) => <ViewportPane key={`${attempt}-${index}`} id={`image-${index}`} active={index === active} series={assigned[index]?.series ?? null}
+            maximized={maximized === index} hidden={maximized !== null && maximized !== index}
+            row={Math.floor(index / (layout === 1 ? 1 : 2)) + 1} column={index % (layout === 1 ? 1 : 2) + 1}
+            maximize={() => { controls.current.forEach((pane) => pane?.prepareResize()); activate(index); setMaximized((before) => before === index ? null : index); }}
             {...runtime} activate={() => activate(index)} register={register.current[index]!} report={report.current[index]!} />)}
         </main>
       </div>

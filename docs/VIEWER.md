@@ -1,23 +1,24 @@
-# Viewer DICOM — V3
+# Viewer DICOM — V4
 
 ## Histórico e validação
 
 - **Viewer V0:** pipeline Orthanc → backend Go → Cornerstone validado com DICOM real pelo responsável pelo PACS.
 - **Viewer V1:** séries, stack e scroll validados; setas apresentaram falha no teste real, corrigida na V2.
 - **Viewer V2: VALIDADO COM DICOM REAL**, conforme validação informada pelo responsável: séries, stack, scroll, quatro Arrow keys, Window/Level, Zoom, Pan, Length, Angle, Probe, Rectangle ROI, Invert, Reset e troca de ferramentas.
-- **Viewer V3:** thumbnails, layouts, múltiplos viewports independentes, viewport ativo, Cine e remoção de annotations. Testes automatizados exclusivamente sintéticos; nenhuma conexão ao Orthanc real ou alteração de produção nesta implementação.
+- **Viewer V3:** thumbnails, layouts, múltiplos viewports, viewport ativo, Cine e gerenciamento de annotations. Teste manual no ambiente PACS apresentou funcionamento geral satisfatório, conforme informado pelo responsável.
+- **Viewer V4:** auto-layout, maximização interna, Rotate/Flip, Fit, Reset validado com as novas apresentações, toolbar e atalhos. Implementação e testes exclusivamente sintéticos; nenhuma conexão ao Orthanc real, deploy ou mudança de produção nesta entrega.
 
 ## Arquitetura atual
 
 `Browser → /api/... com sessão PACS → backend Go → internal/orthanc → Orthanc REST`.
 A URL interna e as credenciais nunca entram nos imageIds. Nenhum novo endpoint,
-DTO, migration, dependência ou mudança de configuração foi necessário na V3.
+DTO, migration, dependência ou mudança de configuração foi necessário nas V3/V4.
 O cabeçalho mantém somente os dados que a Worklist já disponibilizava; acesso
 direto à rota não consulta novos dados identificáveis.
 
 Um **RenderingEngine por sessão do Viewer**, com até quatro StackViewports de IDs
 estáveis. Cada viewport possui um **ToolGroup próprio**, seleção de ferramenta,
-série, stack, índice, inversão, estado de carga e fila de apresentação. Classes
+série, stack, índice, rotação, flips, inversão, estado de carga e fila de apresentação. Classes
 Tools são registradas uma vez por aplicação. Apenas o grupo ativo recebe bindings
 de interação; grupos inativos mantêm desenho de annotations com ferramentas Enabled.
 Nenhuma sincronização de câmera, VOI ou scrolling foi adicionada.
@@ -25,15 +26,15 @@ Nenhuma sincronização de câmera, VOI ou scrolling foi adicionada.
 `ViewerScreen` coordena layout, seleção ativa, metadados compartilhados e sessão.
 `ViewportPane` mantém estados e Cine de seu viewport. `cornerstone.ts` administra
 engine, cache oficial, fila de pixels e controladores. `tools.ts` administra grupos
-e annotations pertencentes à sessão. Não usa internals do Cornerstone.
+e annotations pertencentes à sessão. `layout.ts` contém o algoritmo puro de atribuição e `presentation.ts` concentra leitura de apresentação e Fit. Não usa internals do Cornerstone.
 Referência: [ToolGroups oficiais](https://www.cornerstonejs.org/docs/concepts/cornerstone-tools/toolGroups/).
 
 ## Layout e navegação
 
 - **1x1:** um viewport; **1x2:** duas colunas; **2x2:** quatro viewports.
-- O primeiro viewport abre a primeira série com instâncias; novos slots começam vazios.
+- O primeiro viewport abre a primeira série com instâncias. Novos slots são preenchidos automaticamente segundo o algoritmo V4 abaixo.
 - Clique no viewport (borda destacada) e depois no card da série. O primeiro clique num viewport inativo só o ativa, sem começar um gesto da ferramenta. A série começa na primeira instância.
-- Slots preservados mantêm câmera, série e índice quando o layout muda. Slots removidos param Cine e são destruídos; reabrir um slot cria-o vazio.
+- Slots preservados mantêm câmera, série e índice quando o layout muda. Slots removidos param Cine e são destruídos; a atribuição da série é lembrada. Ao reabrir, a série restaurada começa na primeira imagem com apresentação inicial. Isso difere da maximização, que não remove nenhum slot.
 - Scroll sobre o viewport ativo e ArrowRight/Down avançam; ArrowLeft/Up recuam. Scroll sobre viewport inativo não navega nenhum stack.
 - Navegação manual respeita extremos. O contador confirma a imagem após `IMAGE_RENDERED`.
 - Teclado ignora inputs, textarea, select, contenteditable, role textbox, modificadores e eventos já tratados. Há um único listener capture no window durante a tela.
@@ -44,6 +45,64 @@ erro e retry não removem o painel. Respostas obsoletas não substituem a nova s
 Uma transferência compartilhada já iniciada pode terminar e alimentar o cache;
 seu resultado não muda uma seleção cancelada. Expiração 401 encerra toda a sessão
 e segue o fluxo existente, incluindo cargas de thumbnails e Cine.
+
+## Decisões V4: auto-layout e maximização
+
+Auto-layout é determinístico, sem hanging protocol ou inferência clínica:
+
+1. Mantém atribuições válidas dos slots que continuam visíveis, inclusive a principal.
+2. Restaura primeiro escolhas **manuais** dos slots que voltam ao layout.
+3. Restaura atribuições automáticas anteriores quando não duplicam uma série já usada.
+4. Preenche somente slots vazios com a primeira série ainda não usada, na ordem da lista do backend.
+5. Sem séries restantes, mantém o slot vazio; não carrega séries além dos slots necessários.
+
+Atribuições manuais deliberadamente duplicadas são preservadas. Uma atribuição
+automática antiga que passou a duplicar uma nova escolha manual é substituída
+por outra disponível. Não reordena escolhas existentes. Séries sem instâncias
+também pertencem à lista e exibem estado vazio; erro numa série não dispara
+reorganização ou tentativas automáticas sem fim. Metadados continuam deduplicados
+e imagens entram na fila compartilhada V3.
+
+**Maximização interna:** botão discreto no canto superior direito de cada viewport;
+“Restaurar viewport” ou **Escape** retorna ao layout. Não usa Fullscreen Browser API.
+Optou-se pelo botão, sem duplo clique, para evitar conflito com gestos de medições.
+O layout original permanece no estado React. O viewport escolhido ocupa toda a
+grade; os demais continuam montados com `visibility: hidden`, dimensões válidas,
+sem foco/interação. Preserva séries, índices, apresentação e annotations de todos.
+Não há novos engines, grupos, caches ou timers. Selecionar outro layout enquanto
+maximizado encerra a maximização e aplica explicitamente o novo layout.
+
+Resize usa os ResizeObservers existentes e uma única tarefa requestAnimationFrame
+por engine para agrupar notificações. Antes de React mudar layout/maximização, captura a apresentação oficial de cada stack (zoom e pan dependem das dimensões vigentes),
+chama `RenderingEngine.resize(false, true)`, recalcula a câmera-base com `resetCamera`, reaplica `setViewPresentation` e renderiza.
+Assim conserva zoom relativo e pan após atualizar a câmera-base ao novo tamanho,
+evita corte por simples mudança de proporção e preserva rotação/flips. Descarta snapshots se o viewport foi removido ou a imagem mudou durante uma carga. Resize externo da janela usa a preservação de câmera padrão do engine. Não descarta
+zoom/pan manual; Fit reenquadra quando desejado. Os testes verificam canvas atualizado,
+imagem inicialmente ajustada inteira em transições repetidas para 1x2, pixels presentes em todos os viewports carregados e igualdade dos pixels após maximizar/restaurar com zoom/pan manuais.
+
+## Decisões V4: apresentação, toolbar e atalhos
+
+As APIs foram conferidas no código/distribuição instalada **5.11.0** e na
+[referência pública StackViewport](https://www.cornerstonejs.org/docs/api/core/namespaces/types/classes/istackviewport/).
+Não houve atualização para APIs de outra versão.
+
+- **Rotate Left/Right:** `setViewPresentation({ rotation })`, em passos de −90/+90, normalizados entre 0 e 359 graus. Apenas apresentação do ativo.
+- **Flip Horizontal/Vertical:** alterna o campo correspondente via `setCamera`. Botões refletem ligado/desligado; não alteram pixel data ou arquivo DICOM.
+- **Fit:** centraliza e reajusta zoom/pan. Como `resetCamera` em 5.11 também desfaz orientação, restaura rotação/flips explicitamente. Projeta os quatro cantos da imagem usando `transformIndexToWorld`/`worldToCanvas` e ajusta o zoom para ocupar até 95% do espaço disponível, incluindo imagem retangular rotacionada. Não altera VOI, invert, annotations nem ferramenta ativa.
+- **Reset:** remove flips e rotação, restaura enquadramento/zoom/pan e `resetProperties` recupera VOI/invert iniciais da imagem. Preserva annotations, stack/índice e ferramenta selecionada.
+- **Cine:** Reset e maximização do ativo não iniciam, pausam ou reiniciam Cine. Ações de apresentação ficam indisponíveis durante carga/manipulação; não são enfileiradas para execução tardia. Maximizar outro viewport ativa-o e pausa o anterior, como qualquer troca de ativo V3.
+
+A toolbar mantém ferramentas persistentes destacadas. Rotate/Fit/Reset são ações
+momentâneas sem `aria-pressed`; Flip/Invert mostram estado de apresentação.
+Novos ícones são SVGs locais do design system, com title e aria-label. Layout,
+Cine e limpeza continuam na faixa separada. Não foi adicionada biblioteca de ícones.
+
+Atalhos: setas e Delete/Backspace permanecem; **Escape** restaura o layout;
+**R** gira +90° e **F** aplica Fit no ativo. R/F são alternativas diretas aos
+botões frequentes, sem modificadores e sem repetição ao segurar a tecla.
+Todos ignoram inputs/textarea/select/contenteditable/role textbox, eventos já
+tratados e combinações modificadas. Reutilizam o único listener de teclado,
+removido ao sair. Nenhum atalho altera o arquivo original.
 
 ## Stack e consumo
 
@@ -105,6 +164,9 @@ ferramenta selecionada; scroll e setas mantêm a navegação do stack.
 | Probe | ProbeTool; sem interpretação clínica adicional |
 | Rectangle ROI | RectangleROITool; estatísticas oficiais |
 | Invert | Alterna propriedade invert apenas no viewport ativo |
+| Rotate Left/Right | Rotação de −90/+90 graus no ativo |
+| Flip Horizontal/Vertical | Alterna apresentação por eixo no ativo |
+| Fit | Enquadra, preservando VOI, invert, rotação, flips e annotations |
 | Reset | Restaura câmera, pan/zoom, flips, rotação, VOI e invert; preserva annotations e ferramenta |
 
 Sem Pixel Spacing não inventa mm: fixture sem calibração é apresentada em px.
@@ -147,7 +209,7 @@ Recriar rapidamente o mesmo slot espera o descarte anterior. Não remove annotat
 no descarte individual. A tela remove listener de teclado e expiração, aborta
 HTTP, aguarda filas/decoder, remove annotations próprias/histórico de gestos e
 finalmente destrói engine e caches. Uma nova sessão aguarda o cleanup anterior.
-Não há novos timers persistentes nem requests disparados após expiração.
+O requestAnimationFrame de resize é cancelado ao encerrar a sessão. Não há novos timers persistentes nem requests disparados após expiração.
 
 ## Endpoints da aplicação
 
@@ -240,14 +302,14 @@ Access logs de proxies externos devem igualmente evitar identificadores nestas
 rotas; infraestrutura externa não foi alterada. As fontes externas preexistentes
 do design foram preservadas e são bloqueadas no teste sintético de navegador.
 
-## Dependências, testes e limitações V3
+## Dependências, testes e limitações V4
 
 Nenhuma dependência adicionada ou atualizada. Cornerstone core, tools, metadata
 e dicom-image-loader continuam em **5.11.0**. Sem npm audit fix.
 
 Todos os checks abaixo passaram na validação local: `gofmt -l` sem diferenças; `go vet ./...`, `go test ./...`,
 `go build ./...` e race em `internal/httpapi` e `internal/orthanc` para regressão.
-Frontend: typecheck, 12 testes Node (incluindo temporização/cancelamento/falha de
+Frontend: typecheck, 17 testes Node (incluindo auto-layout e temporização/cancelamento/falha de
 Cine), build e smoke Chrome com servidor sintético. Comandos:
 
 ```sh
@@ -264,7 +326,7 @@ npm run build
 node tests/viewer-smoke.mjs
 ```
 
-Chrome usa perfil temporário, fixtures grayscale 32×32 e eventos reais CDP de
+Chrome usa perfil temporário, fixtures grayscale 32×32 e retangular 48×24 e eventos reais CDP de
 mouse/teclado. Não usa .env, banco, backend vivo ou PACS real. `CHROME_BIN` pode
 substituir o caminho macOS. Testa canvas e SVG reais; jsdom não demonstra a
 renderização GPU/Tools. Backend continua coberto separadamente por httptest.
@@ -273,14 +335,13 @@ Cobertura browser: ferramentas V2, layouts e mudanças rápidas, ativo, stacks e
 contadores independentes, Invert/Reset isolados, falha localizada, Cine play/pause,
 avanço/loop/paradas, thumbnails/placeholder, seleção obsoleta, campos editáveis,
 Delete/Backspace, confirmação/cancelamento, preservação por série e compartilhamento
-nativo, expiração durante Cine e thumbnails, interrupção de requests após 401 e reabertura sem listeners/annotations acumulados. A captura sintética 2x2 foi inspecionada: quatro imagens, contadores independentes, borda ativa, overlays e miniaturas renderizados.
+nativo, expiração durante Cine e thumbnails, interrupção de requests após 401 e reabertura sem listeners/annotations acumulados. Na V4, inclui auto-preenchimento, restauração manual, Rotate/Flip, Fit de imagem retangular, preservação de annotations/VOI/orientação, Reset isolado, maximização/restauração e Escape/R/F com proteção de editáveis. Compara pixels e referências de canvas e confirma ausência de novos downloads ao maximizar.
 
 Limitações: WebGL2; até quatro viewports; somente primeiro frame de cada instância
 multiframe; sem sincronização, MPR, SR, persistência, download ou impressão.
 A miniatura CPU pode falhar em formatos que funcionem no viewport GPU; placeholder
 não impede seleção. Não há validação de todos os codecs/modalidades/equipamentos
-ou de uso diagnóstico. V3 precisa de validação controlada pelo responsável antes
-de ampliar escopo; nenhum deploy foi feito.
+ou de uso diagnóstico. V4 precisa de validação manual controlada pelo responsável. Sem reconstrução 3D, hanging protocol ou recursos avançados. Nenhum deploy foi feito.
 
 Permanecem warnings Vite de chunks grandes e módulos Node externalizados em
 codecs/XML. A auditoria V2 registrou **12 vulnerabilidades npm (6 moderadas e 6
@@ -307,3 +368,26 @@ Modificados:
 
 Backend, endpoints, DTOs, autenticação, banco, Worklist, configuração Orthanc,
 Docker e dependências permanecem inalterados.
+
+## Arquivos V4
+
+Criados:
+
+- `frontend/src/viewer/layout.ts`
+- `frontend/src/viewer/presentation.ts`
+- `frontend/tests/viewer-layout.test.mjs`
+- `frontend/tests/viewer-v4-browser.mjs`
+
+Modificados:
+
+- `frontend/src/screens/ViewerScreen.tsx`
+- `frontend/src/viewer/ViewportPane.tsx`
+- `frontend/src/viewer/ViewerToolbar.tsx`
+- `frontend/src/viewer/cornerstone.ts`
+- `frontend/src/design-system/Icon.tsx`
+- `frontend/tests/dicom-fixture.mjs`
+- `frontend/tests/viewer-smoke.mjs`
+- `docs/VIEWER.md`
+
+Nenhuma dependência, endpoint, backend, banco, autenticação, Worklist ou
+infraestrutura foi alterada na V4. Não houve migração nem deploy.

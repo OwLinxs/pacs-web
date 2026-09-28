@@ -2,24 +2,29 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError, type ViewerSeries } from '../api/client';
 import type { StackController, ViewerSession } from './cornerstone';
 import { createCine } from './cine';
+import { Icon } from '../design-system/Icon';
+import type { PresentationState } from './presentation';
 import type { ViewerTool } from './tools';
 
-export type PaneState = { ready: boolean; tool: ViewerTool; inverted: boolean; playing: boolean; total: number };
+export type PaneState = PresentationState & { ready: boolean; tool: ViewerTool; playing: boolean; total: number };
 export type PaneControls = {
   selectTool: (tool: ViewerTool) => void; invert: () => void; reset: () => void;
   step: (delta: number) => void; play: (fps: number) => void; pause: () => void;
+  rotate: (delta: number) => void; flip: (axis: 'horizontal' | 'vertical') => void; fit: () => void;
+  prepareResize: () => void;
   clear: () => void; deleteSelected: () => void;
 };
 type Props = {
   id: string; active: boolean; series: ViewerSeries | null;
   session: Promise<ViewerSession>; signal: AbortSignal;
   load: (seriesId: string) => Promise<string[]>;
+  maximized: boolean; hidden: boolean; row: number; column: number; maximize: () => void;
   activate: () => void; expired: () => void;
   register: (controls: PaneControls | null) => void;
   report: (state: PaneState) => void;
 };
 
-export function ViewportPane({ id, active, series, session, signal, load, activate, expired, register, report }: Props) {
+export function ViewportPane({ id, active, series, session, signal, load, activate, expired, register, report, maximized, hidden, row, column, maximize }: Props) {
   const element = useRef<HTMLDivElement>(null);
   const driver = useRef<StackController | null>(null);
   const factory = useRef<Promise<StackController> | null>(null);
@@ -27,7 +32,7 @@ export function ViewportPane({ id, active, series, session, signal, load, activa
   const [state, setState] = useState<'empty' | 'loading' | 'ready' | 'error'>('empty');
   const [position, setPosition] = useState({ index: 0, total: 0 });
   const [tool, setTool] = useState<ViewerTool>('WindowLevel');
-  const [inverted, setInverted] = useState(false);
+  const [presentation, setPresentation] = useState<PresentationState>({ inverted: false, rotation: 0, flipHorizontal: false, flipVertical: false });
   const [playing, setPlaying] = useState(false);
   const [cineFPS, setCineFPS] = useState(10);
   const [attempt, setAttempt] = useState(0);
@@ -46,7 +51,7 @@ export function ViewportPane({ id, active, series, session, signal, load, activa
       const controller = await createStackViewer(element.current!, lifetime.signal, {
         loading: () => { if (!lifetime.signal.aborted) setState('loading'); },
         rendered: (index, total) => { if (!lifetime.signal.aborted) { setPosition({ index, total }); setState('ready'); } },
-        presentation: (value) => { if (!lifetime.signal.aborted) setInverted(value); },
+        presentation: (value) => { if (!lifetime.signal.aborted) setPresentation(value); },
         failed: () => { playback.stop(); if (!lifetime.signal.aborted) setState('error'); },
       }, shared, id);
       driver.current = controller; controller.activate(activeRef.current);
@@ -54,8 +59,10 @@ export function ViewportPane({ id, active, series, session, signal, load, activa
     });
     void factory.current.catch(() => { if (!lifetime.signal.aborted) setState('error'); });
     register({
+      prepareResize: () => driver.current?.prepareResize(),
       selectTool(value) { if (driver.current?.selectTool(value)) setTool(value); },
       invert: () => driver.current?.invert(), reset: () => driver.current?.reset(),
+      rotate: (delta) => driver.current?.rotate(delta), flip: (axis) => driver.current?.flip(axis), fit: () => driver.current?.fit(),
       step(delta) { playback.stop(); void driver.current?.step(delta); },
       play: (fps) => { setCineFPS(fps); playback.play(fps); }, pause: playback.stop,
       clear: () => { playback.stop(); driver.current?.clearAnnotations(); }, deleteSelected: () => { playback.stop(); driver.current?.deleteSelected(); },
@@ -93,7 +100,7 @@ export function ViewportPane({ id, active, series, session, signal, load, activa
     return () => selection.abort();
   }, [series, load, signal, expired, attempt]);
 
-  useEffect(() => { report({ ready: state === 'ready', tool, inverted, playing, total: position.total }); }, [state, tool, inverted, playing, position.total, report]);
+  useEffect(() => { report({ ready: state === 'ready', tool, ...presentation, playing, total: position.total }); }, [state, tool, presentation, playing, position.total, report]);
   useEffect(() => {
     const area = element.current?.parentElement;
     if (!area) return;
@@ -104,9 +111,12 @@ export function ViewportPane({ id, active, series, session, signal, load, activa
     area.addEventListener('wheel', wheel, { passive: false });
     return () => area.removeEventListener('wheel', wheel);
   }, []);
-  return <section data-viewport={id} data-active={active} tabIndex={0} aria-label={`Viewport ${Number(id.slice(-1)) + 1}`} onPointerDownCapture={(event) => { if (!active) event.preventDefault(); activate(); event.currentTarget.focus({ preventScroll: true }); }}
-    style={{ position: 'relative', minWidth: 0, minHeight: 0, background: 'black', outline: 'none', border: `1px solid ${active ? 'var(--color-accent-400)' : '#252525'}` }}>
+  return <section data-viewport={id} data-active={active} data-maximized={maximized} aria-hidden={hidden} tabIndex={hidden ? -1 : 0} aria-label={`Viewport ${Number(id.slice(-1)) + 1}`} onPointerDownCapture={(event) => { if (!active) event.preventDefault(); activate(); event.currentTarget.focus({ preventScroll: true }); }}
+    style={{ position: 'relative', gridColumn: maximized ? '1 / -1' : column, gridRow: maximized ? '1 / -1' : row, zIndex: maximized ? 2 : 0, visibility: hidden ? 'hidden' : 'visible', pointerEvents: hidden ? 'none' : 'auto', minWidth: 0, minHeight: 0, background: 'black', outline: 'none', border: `1px solid ${active ? 'var(--color-accent-400)' : '#252525'}` }}>
     <div ref={element} style={{ position: 'absolute', inset: 0 }} onContextMenu={(event) => event.preventDefault()} />
+    <button type="button" aria-label={maximized ? 'Restaurar viewport' : 'Maximizar viewport'} title={maximized ? 'Restaurar viewport (Escape)' : 'Maximizar viewport'}
+      onPointerDown={(event) => event.stopPropagation()} onClick={maximize}
+      style={{ position: 'absolute', top: 8, right: 8, zIndex: 3, border: '1px solid #444', background: '#181818', color: '#bbb', padding: 4, cursor: 'pointer' }}><Icon name={maximized ? 'restore' : 'full'} /></button>
     {state !== 'ready' && <div role={state === 'error' ? 'alert' : 'status'} style={{ position: 'absolute', inset: 0, background: 'black', display: 'grid', placeContent: 'center', textAlign: 'center', padding: 20, gap: 12 }}>
       <span>{state === 'loading' ? 'Carregando imagem…' : state === 'error' ? 'Não foi possível carregar esta série ou imagem.' : series ? 'Série sem imagens' : 'Selecione uma série'}</span>
       {state === 'error' && <button type="button" onClick={() => setAttempt((value) => value + 1)}>Tentar novamente</button>}

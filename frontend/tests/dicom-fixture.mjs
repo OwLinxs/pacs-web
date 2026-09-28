@@ -1,5 +1,5 @@
 // DICOM Part 10 sintético: quadrado 32x32, sem qualquer paciente real.
-export function syntheticDICOM({ calibrated = true } = {}) {
+export function syntheticDICOM({ calibrated = true, width = 32, height = 32 } = {}) {
   const element = (group, tag, vr, value) => {
     let data = Buffer.isBuffer(value) ? value : Buffer.from(value, 'ascii');
     if (data.length % 2) data = Buffer.concat([data, Buffer.from([vr === 'UI' ? 0 : 32])]);
@@ -18,8 +18,8 @@ export function syntheticDICOM({ calibrated = true } = {}) {
     element(2, 0x12, 'UI', '2.25.987654321'),
   ]);
   const size = Buffer.alloc(4); size.writeUInt32LE(meta.length);
-  const pixels = Buffer.alloc(32 * 32 * 2);
-  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) pixels.writeUInt16LE((x * 80 + y * 20) % 4096, 2 * (32 * y + x));
+  const pixels = Buffer.alloc(width * height * 2);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.writeUInt16LE((x * 80 + y * 20) % 4096, 2 * (width * y + x));
   return Buffer.concat([
     Buffer.alloc(128), Buffer.from('DICM'), element(2, 0, 'UL', size), meta,
     element(8, 0x16, 'UI', sop), element(8, 0x18, 'UI', uid), element(8, 0x60, 'CS', 'OT'),
@@ -29,7 +29,7 @@ export function syntheticDICOM({ calibrated = true } = {}) {
     element(0x20, 0x11, 'IS', '1'), element(0x20, 0x13, 'IS', '1'),
     element(0x20, 0x32, 'DS', '0\\0\\0'), element(0x20, 0x37, 'DS', '1\\0\\0\\0\\1\\0'),
     element(0x28, 2, 'US', us(1)), element(0x28, 4, 'CS', 'MONOCHROME2'),
-    element(0x28, 0x10, 'US', us(32)), element(0x28, 0x11, 'US', us(32)),
+    element(0x28, 0x10, 'US', us(height)), element(0x28, 0x11, 'US', us(width)),
     ...(calibrated ? [element(0x28, 0x30, 'DS', '1\\1')] : []), element(0x28, 0x100, 'US', us(16)),
     element(0x28, 0x101, 'US', us(12)), element(0x28, 0x102, 'US', us(11)), element(0x28, 0x103, 'US', us(0)),
     element(0x28, 0x1050, 'DS', '2048'), element(0x28, 0x1051, 'DS', '4096'),

@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { syntheticDICOM } from './dicom-fixture.mjs';
 import { testViewerTools } from './viewer-tools-browser.mjs';
+import { testViewerV4 } from './viewer-v4-browser.mjs';
 import { testViewerV3 } from './viewer-v3-browser.mjs';
 
 const id = (n) => `${String(n).padStart(8, '0')}-00000000-00000000-00000000-00000000`;
@@ -41,7 +42,7 @@ const server = createServer(async (req, res) => {
   if (path === `${studyPath}/${id(7)}/instances`) { await new Promise((resolve) => setTimeout(resolve, 300)); return json({ items: [{ orthancInstanceId: id(70), number: 1 }] }); }
   if (path.endsWith(`/${id(30)}/dicom`) && (failImage || expireImage)) { res.statusCode = expireImage ? 401 : 502; return json({ error: { code: 'FIXTURE_FAILURE', message: 'Falha sintética.' } }); }
   if (expireThumbnail && path.endsWith(`/${id(40)}/dicom`)) { res.statusCode = 401; return json({ error: { code: 'SESSION_EXPIRED', message: 'Sessão expirada.' } }); }
-  if (path.endsWith('/dicom') && path.startsWith(studyPath)) { res.setHeader('Content-Type', 'application/dicom'); return res.end(syntheticDICOM({ calibrated: !path.includes(`/${id(4)}/`) })); }
+  if (path.endsWith('/dicom') && path.startsWith(studyPath)) { res.setHeader('Content-Type', 'application/dicom'); return res.end(syntheticDICOM({ calibrated: !path.includes(`/${id(4)}/`), width: path.includes(`/${id(7)}/`) ? 48 : 32, height: path.includes(`/${id(7)}/`) ? 24 : 32 })); }
   if (path.startsWith('/api/')) { res.statusCode = 404; return json({ error: { code: 'NOT_FOUND', message: 'Recurso fictício ausente.' } }); }
   try {
     const asset = path.startsWith('/assets/') && /^\/assets\/[\w.-]+$/.test(path) ? path.slice(1) : 'index.html';
@@ -108,7 +109,7 @@ try {
   const count = async (text) => { try { await until(() => evaluate(`document.body.textContent.includes(${JSON.stringify(text)})`)); } catch (error) { console.error('Estado sintético:', text, await evaluate('document.body.textContent'), failures, calls.slice(-5)); throw error; } };
   // Eventos reais do Chrome: não dispara KeyboardEvent artificial no <main>.
   const key = async (key) => {
-    const code = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Delete: 46, Backspace: 8 }[key];
+    const code = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Delete: 46, Backspace: 8, Escape: 27, r: 82, f: 70 }[key];
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: code });
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: code });
   };
@@ -117,11 +118,11 @@ try {
   assert.ok(files().every(path => !path.includes(`/${id(30)}/`) && !path.includes(`/${id(31)}/`) && !path.includes(`/${id(41)}/`)), 'miniaturas usam somente primeira instância');
   await evaluate("window.fixtureEngine = document.querySelector('main canvas')");
   await testViewerTools({ evaluate, command, key, count, choose, pause, until });
-  const loadedAfterTools = files().length;
+  const loadedAfterTools = files().filter(path => path.endsWith(`/${id(30)}/dicom`)).length;
   // Reproduz perda de foco do main que não era coberta no V1.
   await evaluate("document.querySelector('aside button').focus()");
   await key('ArrowRight'); await count('Imagem 2 / 3');
-  assert.equal(files().length, loadedAfterTools + 1);
+  assert.equal(files().filter(path => path.endsWith(`/${id(30)}/dicom`)).length, loadedAfterTools + 1);
   const wheelPoint = await evaluate("(() => {const r=document.querySelector('main canvas').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
   await command('Input.dispatchMouseEvent', { type:'mouseWheel', ...wheelPoint, deltaX:0, deltaY:100 });
   await count('Imagem 3 / 3');
@@ -148,6 +149,8 @@ try {
     await evaluate("document.querySelector('[role=button]').click()");
     await count('Imagem 1 / 3');
   };
+  await reopen();
+  await testViewerV4({ evaluate, command, key, count, choose, pause, until, calls });
   await reopen();
   // Falha de um arquivo não bloqueia a navegação para a próxima instância.
   failImage = true;
@@ -178,7 +181,7 @@ try {
   await count('Sua sessão expirou por segurança.');
   const stoppedThumbnailRequests=calls.length; await pause(400); assert.equal(calls.length,stoppedThumbnailRequests,'expiração de thumbnail encerra operações');
   assert.equal(failures.length, 0);
-  console.log(`PASS: Viewer V3 + regressão V2 — stack sob demanda, setas/scroll, contador, troca de série, vazio, falha e seleção obsoleta. Screenshot: ${output}`);
+  console.log(`PASS: Viewer V4 + regressão V2/V3 — stack sob demanda, setas/scroll, contador, troca de série, vazio, falha e seleção obsoleta. Screenshot: ${output}`);
 } finally {
   socket?.close(); chrome.kill();
   await once(chrome, 'exit').catch(() => {});

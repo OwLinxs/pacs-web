@@ -14,17 +14,22 @@ const tools: { name: ViewerTool; label: string; icon: IconName }[] = [
 type Props = {
   selected: ViewerTool;
   inverted: boolean;
+  flipHorizontal: boolean;
+  flipVertical: boolean;
+  onRotate: (delta: number) => void;
+  onFlip: (axis: 'horizontal' | 'vertical') => void;
+  onFit: () => void;
   disabled: boolean;
   onSelect: (tool: ViewerTool) => void;
   onInvert: () => void;
   onReset: () => void;
 };
 
-export function ViewerToolbar({ selected, inverted, disabled, onSelect, onInvert, onReset }: Props) {
-  const button = (label: string, icon: IconName, active: boolean | undefined, onClick: () => void) => (
-    <button key={label} type="button" title={label} aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick}
+export function ViewerToolbar({ selected, inverted, disabled, onSelect, onInvert, onReset, flipHorizontal, flipVertical, onRotate, onFlip, onFit }: Props) {
+  const button = (label: string, icon: IconName, active: boolean | undefined, onClick: () => void, compact = false, shortcut = '') => (
+    <button key={label} type="button" title={shortcut ? `${label} (${shortcut})` : label} aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick}
       style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 'none', height: 36, padding: '0 10px', font: 'inherit', fontSize: 12, border: '1px solid transparent', borderBottomColor: active ? 'var(--color-accent-400)' : 'transparent', background: active ? 'rgba(255,255,255,.08)' : 'transparent', color: active ? 'var(--color-accent-300)' : 'var(--color-neutral-300)', opacity: disabled ? .4 : 1, cursor: disabled ? 'default' : 'pointer' }}>
-      <Icon name={icon} size={16} /><span>{label}</span>
+      <Icon name={icon} size={16} />{!compact && <span>{label}</span>}
     </button>
   );
   return (
@@ -32,6 +37,11 @@ export function ViewerToolbar({ selected, inverted, disabled, onSelect, onInvert
       {tools.map((tool) => button(tool.label, tool.icon, selected === tool.name, () => onSelect(tool.name)))}
       <span style={{ height: 22, width: 1, margin: '0 6px', background: 'rgba(255,255,255,.12)', flex: 'none' }} />
       {button('Invert', 'contrast', inverted, onInvert)}
+      {button('Rotate Left', 'rotateLeft', undefined, () => onRotate(-90), true)}
+      {button('Rotate Right', 'rotate', undefined, () => onRotate(90), true, 'R')}
+      {button('Flip Horizontal', 'flipHorizontal', flipHorizontal, () => onFlip('horizontal'), true)}
+      {button('Flip Vertical', 'flipVertical', flipVertical, () => onFlip('vertical'), true)}
+      {button('Fit', 'fit', undefined, onFit, true, 'F')}
       {button('Reset', 'reset', undefined, onReset)}
       <span style={{ marginLeft: 'auto', paddingLeft: 12, fontSize: 11, whiteSpace: 'nowrap', color: 'var(--color-neutral-500)' }}>Scroll / setas: imagens</span>
     </div>

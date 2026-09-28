@@ -3,6 +3,8 @@ import { init as initLoader, wadouri } from '@cornerstonejs/dicom-image-loader';
 import { utilities as metadata } from '@cornerstonejs/metadata';
 import { createAnnotationSession, createViewerTools, initializeViewerTools, type ViewerTool } from './tools';
 
+import { fitToWindow, readPresentation, type PresentationState } from './presentation';
+
 export const VIEWER_SESSION_EXPIRED = 'pacs-viewer-session-expired';
 let initialized = false;
 const requests = new Map<XMLHttpRequest, string>();
@@ -36,7 +38,7 @@ export type StackCallbacks = {
   loading: () => void;
   rendered: (index: number, total: number) => void;
   failed: () => void;
-  presentation: (inverted: boolean) => void;
+  presentation: (value: PresentationState) => void;
 };
 export type StackController = {
   setStack: (paths: string[], signal: AbortSignal) => Promise<void>;
@@ -45,7 +47,11 @@ export type StackController = {
   activate: (active: boolean) => void;
   invert: () => void;
   reset: () => void;
+  rotate: (delta: number) => void;
+  flip: (axis: 'horizontal' | 'vertical') => void;
+  fit: () => void;
   suspend: () => void;
+  prepareResize: () => void;
   clearAnnotations: () => void;
   deleteSelected: () => void;
 };
@@ -62,6 +68,33 @@ export async function createViewerSession(lifetime: AbortSignal) {
   const annotations = createAnnotationSession(engine.id, () => { if (!engine.hasBeenDestroyed) engine.render(); });
   const pending = new Set<Promise<unknown>>();
   const retiring = new Map<string, Promise<unknown>>();
+  let resizeFrame = 0;
+  const resizePresentations = new Map<StackViewport, { imageId: string; presentation: ReturnType<StackViewport['getViewPresentation']> }>();
+  const prepareResize = (viewport: StackViewport) => {
+    if (resizePresentations.has(viewport) || lifetime.aborted) return;
+    const imageId = viewport.getCurrentImageId();
+    if (imageId && viewport.getCornerstoneImage()?.imageId === imageId) {
+      resizePresentations.set(viewport, { imageId, presentation: viewport.getViewPresentation() });
+    }
+  };
+  const resize = () => {
+    if (resizeFrame || lifetime.aborted) return;
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = 0;
+      if (lifetime.aborted || engine.hasBeenDestroyed) return;
+      const viewports = engine.getViewports();
+      engine.resize(false, true);
+      // Captura feita ANTES de React mudar as dimensões: getPan depende delas.
+      // Não aplica estado antigo se o slot foi removido ou a imagem já mudou.
+      for (const [viewport, saved] of resizePresentations) {
+        if (!viewports.includes(viewport) || viewport.getCurrentImageId() !== saved.imageId) continue;
+        viewport.resetCamera();
+        viewport.setViewPresentation(saved.presentation);
+      }
+      resizePresentations.clear();
+      engine.render();
+    });
+  };
   // Uma decodificação/download por vez, inclusive miniaturas. Cache é o oficial.
   let pixels: Promise<unknown> = Promise.resolve();
   const load = (imageId: string, signal: AbortSignal) => {
@@ -81,6 +114,8 @@ export async function createViewerSession(lifetime: AbortSignal) {
     return run;
   };
   lifetime.addEventListener('abort', () => {
+    cancelAnimationFrame(resizeFrame);
+    resizePresentations.clear();
     for (const xhr of requests.keys()) xhr.abort();
     void Promise.resolve().then(() => Promise.allSettled([pixels, ...pending])).then(() => {
       try { annotations.dispose(); engine.destroy(); cache.purgeCache(); wadouri.dataSetCacheManager.purge(); metadata.clearCacheData(); }
@@ -88,7 +123,7 @@ export async function createViewerSession(lifetime: AbortSignal) {
     });
   }, { once: true });
   return {
-    engine, annotations, load,
+    engine, annotations, load, resize, prepareResize,
     waitForViewport(id: string) { return retiring.get(id) ?? Promise.resolve(); },
     retire(id: string, promise: Promise<unknown>) { retiring.set(id, promise); },
     track(promise: Promise<unknown>) { pending.add(promise); void promise.finally(() => pending.delete(promise)).catch(() => {}); },
@@ -115,8 +150,9 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
   let imageIds: string[] = [];
   let targetIndex = -1;
   let busy = false;
+  let presented = false;
   let revision = 0;
-  const observer = new ResizeObserver(() => { if (!engine.hasBeenDestroyed) engine.resize(true, true); });
+  const observer = new ResizeObserver(session.resize);
   observer.observe(element);
 
   const resetPresentation = () => {
@@ -125,7 +161,7 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
     viewport.resetCamera();
     viewport.resetProperties();
     viewport.render();
-    callbacks.presentation(!!viewport.getProperties().invert);
+    callbacks.presentation(readPresentation(viewport));
   };
 
   const render = async (index: number, signal: AbortSignal, load: () => Promise<unknown>, reset = false) => {
@@ -160,8 +196,9 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
     });
     signal.throwIfAborted(); lifetime.throwIfAborted();
     targetIndex = index;
+    presented = true;
     tools.suspend(!active);
-    callbacks.presentation(!!viewport.getProperties().invert);
+    callbacks.presentation(readPresentation(viewport));
     callbacks.rendered(index, imageIds.length);
   };
 
@@ -179,6 +216,7 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
 
   return {
     setStack(paths, signal) {
+      presented = false;
       tools.suspend(true);
       const token = ++revision;
       currentSignal = signal;
@@ -196,7 +234,8 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
       session.track(queue);
       return run;
     },
-    suspend() { tools.suspend(true); },
+    prepareResize() { session.prepareResize(viewport); },
+    suspend() { presented = false; tools.suspend(true); },
     activate(value) { active = value; tools.suspend(!active || busy || !imageIds.length || !!currentSignal?.aborted); },
     clearAnnotations() { if (active && !busy) { tools.cancel(); session.annotations.clear(imageIds); } },
     deleteSelected() { if (active && !busy && !tools.interacting()) session.annotations.deleteSelected(viewport.getCurrentImageId()); },
@@ -207,11 +246,26 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
     invert() {
       if (busy || lifetime.aborted || currentSignal?.aborted || !imageIds.length || tools.interacting()) return;
       viewport.setProperties({ invert: !viewport.getProperties().invert });
-      viewport.render(); callbacks.presentation(!!viewport.getProperties().invert);
+      viewport.render(); callbacks.presentation(readPresentation(viewport));
     },
     reset() {
       if (busy || lifetime.aborted || currentSignal?.aborted || !imageIds.length || tools.interacting()) return;
       resetPresentation();
+    },
+    rotate(delta) {
+      if (!active || !presented || busy || lifetime.aborted || currentSignal?.aborted || !imageIds.length || tools.interacting()) return;
+      viewport.setViewPresentation({ rotation: (Math.round(viewport.getRotation()) + delta + 360) % 360 });
+      viewport.render(); callbacks.presentation(readPresentation(viewport));
+    },
+    flip(axis) {
+      if (!active || !presented || busy || lifetime.aborted || currentSignal?.aborted || !imageIds.length || tools.interacting()) return;
+      const camera = viewport.getCamera();
+      viewport.setCamera(axis === 'horizontal' ? { flipHorizontal: !camera.flipHorizontal } : { flipVertical: !camera.flipVertical });
+      viewport.render(); callbacks.presentation(readPresentation(viewport));
+    },
+    fit() {
+      if (!active || !presented || busy || lifetime.aborted || currentSignal?.aborted || !imageIds.length || tools.interacting()) return;
+      fitToWindow(viewport); viewport.render(); callbacks.presentation(readPresentation(viewport));
     },
     async step(delta, loop = false) {
       const signal = currentSignal;
@@ -219,6 +273,7 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
       const index = loop ? (targetIndex + delta + imageIds.length) % imageIds.length : Math.min(imageIds.length - 1, Math.max(0, targetIndex + delta));
       if (index === targetIndex) return;
       targetIndex = index;
+      presented = false;
       busy = true;
       tools.suspend(true);
       callbacks.loading();

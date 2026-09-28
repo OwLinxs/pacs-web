@@ -5,6 +5,10 @@
  */
 
 const PATHS = {
+  rotateLeft: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5"/>',
+  flipHorizontal: '<path d="M12 3v18M3 7l5-3v16l-5-3ZM21 7l-5-3v16l5-3Z"/>',
+  flipVertical: '<path d="M3 12h18M7 3l-3 5h16l-3-5ZM7 21l-3-5h16l-3 5Z"/>',
+  restore: '<path d="M21 3l-7 7M14 4v6h6M3 21l7-7M4 14h6v6"/>',
   angle: '<path d="M4 4v16h16M4 13a7 7 0 0 1 7 7"/>',
   probe: '<circle cx="12" cy="12" r="6"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
   search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
