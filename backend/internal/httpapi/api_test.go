@@ -47,6 +47,7 @@ type opcoesCenario struct {
 	studies         httpapi.StudyFinder
 	viewer          httpapi.ViewerClient
 	units           httpapi.UnitsStore
+	users           func(*authtest.Users, *authtest.Sessions) httpapi.UsersService
 	log             *slog.Logger
 }
 
@@ -74,6 +75,10 @@ func montarCenario(t *testing.T, opcoes opcoesCenario) *cenario {
 	}
 
 	configuracoes := novoSettingsFake()
+	var usersService httpapi.UsersService
+	if opcoes.users != nil {
+		usersService = opcoes.users(usuarios, sessoes)
+	}
 
 	api, err := httpapi.New(httpapi.Deps{
 		Config: config.Config{
@@ -89,6 +94,7 @@ func montarCenario(t *testing.T, opcoes opcoesCenario) *cenario {
 		Studies:   opcoes.studies,
 		Viewer:    opcoes.viewer,
 		Units:     opcoes.units,
+		Users:     usersService,
 		Auditoria: auditoria,
 	})
 	if err != nil {

@@ -50,6 +50,7 @@ type Deps struct {
 	Studies  StudyFinder
 	Viewer   ViewerClient
 	Units    UnitsStore
+	Users    UsersService
 	// Auditoria registra eventos administrativos. Opcional.
 	Auditoria AuditRecorder
 	// Now é opcional; o padrão é time.Now.
@@ -67,6 +68,7 @@ type Server struct {
 	studies   StudyFinder
 	viewer    ViewerClient
 	units     UnitsStore
+	users     UsersService
 	auditoria AuditRecorder
 	now       func() time.Time
 
@@ -101,6 +103,7 @@ func New(deps Deps) (*Server, error) {
 		studies:   deps.Studies,
 		viewer:    deps.Viewer,
 		units:     deps.Units,
+		users:     deps.Users,
 		auditoria: deps.Auditoria,
 		now:       agora,
 		loginLimiter: newRateLimiter(
@@ -139,6 +142,19 @@ func (s *Server) montarRotas() http.Handler {
 	mux.Handle("GET /api/units", encadear(http.HandlerFunc(s.handleListUnits), s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor, user.RoleMedico)))
 	mux.Handle("POST /api/admin/units", encadear(http.HandlerFunc(s.handleCreateUnit), s.requireSession, s.requireRole(user.RoleAdmin)))
 	mux.Handle("PATCH /api/admin/units/{id}", encadear(http.HandlerFunc(s.handlePatchUnit), s.requireSession, s.requireRole(user.RoleAdmin)))
+
+	mux.Handle("POST /api/auth/change-password", encadear(http.HandlerFunc(s.handleChangePassword), s.requireSession))
+	mux.Handle("GET /api/admin/users", encadear(http.HandlerFunc(s.handleUsers), s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor)))
+	for route, handler := range map[string]http.HandlerFunc{
+		"POST /api/admin/users/medicos":             s.handleUserAction("create", user.RoleMedico),
+		"POST /api/admin/users/gestores":            s.handleUserAction("create", user.RoleGestor),
+		"PATCH /api/admin/users/{id}":               s.handleUserAction("edit", ""),
+		"POST /api/admin/users/{id}/active":         s.handleUserAction("active", ""),
+		"POST /api/admin/users/{id}/renew":          s.handleUserAction("renew", ""),
+		"POST /api/admin/users/{id}/reset-password": s.handleUserAction("reset", ""),
+	} {
+		mux.Handle(route, encadear(handler, s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor)))
+	}
 
 	// Rota administrativa mínima, só para comprovar a autorização por perfil.
 	// Será substituída pelos endpoints reais de administração.

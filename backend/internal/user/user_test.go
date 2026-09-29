@@ -24,7 +24,7 @@ func TestNewUserValidate(t *testing.T) {
 	base := func() NewUser {
 		return NewUser{
 			Name:         "Medico Teste",
-			Username:     "medico.teste",
+			Username:     "medico_teste",
 			Email:        "medico.teste@exemplo.invalid",
 			PasswordHash: "$argon2id$v=19$m=65536,t=3,p=2$c2FsdA$aGFzaA",
 			Role:         RoleMedico,
@@ -38,10 +38,11 @@ func TestNewUserValidate(t *testing.T) {
 	}{
 		{"válido", func(*NewUser) {}, false},
 		{"sem e-mail", func(n *NewUser) { n.Email = "" }, false},
-		{"username com maiúsculas é normalizado", func(n *NewUser) { n.Username = "Medico.Teste" }, false},
+		{"username com maiúsculas é normalizado", func(n *NewUser) { n.Username = "Medico_Teste" }, false},
 		{"nome vazio", func(n *NewUser) { n.Name = "   " }, true},
 		{"nome gigante", func(n *NewUser) { n.Name = strings.Repeat("a", 121) }, true},
 		{"username curto", func(n *NewUser) { n.Username = "ab" }, true},
+		{"username com ponto", func(n *NewUser) { n.Username = "medico.teste" }, true},
 		{"username com espaço", func(n *NewUser) { n.Username = "medico teste" }, true},
 		{"username com acento", func(n *NewUser) { n.Username = "médico.teste" }, true},
 		{"username começando com ponto", func(n *NewUser) { n.Username = ".medico" }, true},

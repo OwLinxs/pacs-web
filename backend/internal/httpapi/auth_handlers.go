@@ -33,15 +33,17 @@ type unitResponse struct {
 // Este struct existe para que nada do modelo interno escape por acidente:
 // password_hash não tem representação aqui.
 type userResponse struct {
-	ID               string        `json:"id"`
-	Name             string        `json:"name"`
-	Username         string        `json:"username"`
-	Email            string        `json:"email,omitempty"`
-	Role             string        `json:"role"`
-	Unit             *unitResponse `json:"unit"`
-	Active           bool          `json:"active"`
-	AccessValidUntil *string       `json:"accessValidUntil"`
-	LastLoginAt      *string       `json:"lastLoginAt"`
+	MustChangePassword bool           `json:"mustChangePassword"`
+	Units              []user.UnitRef `json:"units"`
+	ID                 string         `json:"id"`
+	Name               string         `json:"name"`
+	Username           string         `json:"username"`
+	Email              string         `json:"email,omitempty"`
+	Role               string         `json:"role"`
+	Unit               *unitResponse  `json:"unit"`
+	Active             bool           `json:"active"`
+	AccessValidUntil   *string        `json:"accessValidUntil"`
+	LastLoginAt        *string        `json:"lastLoginAt"`
 }
 
 type sessionResponse struct {
@@ -50,12 +52,16 @@ type sessionResponse struct {
 
 func paraUserResponse(u user.User) userResponse {
 	resposta := userResponse{
+		MustChangePassword: u.MustChangePassword, Units: u.Units,
 		ID:       u.ID.String(),
 		Name:     u.Name,
 		Username: u.Username,
 		Email:    u.Email,
 		Role:     string(u.Role),
 		Active:   u.Active,
+	}
+	if resposta.Units == nil {
+		resposta.Units = []user.UnitRef{}
 	}
 	if u.UnitID != nil {
 		resposta.Unit = &unitResponse{ID: u.UnitID.String(), Name: u.UnitName}

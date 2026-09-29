@@ -10,6 +10,7 @@ import { initialWorklist } from './worklist/model';
 import { ExamesScreen } from './screens/ExamesScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { UnidadesScreen } from './screens/UnidadesScreen';
+import { TrocaSenhaScreen } from './screens/TrocaSenhaScreen';
 import { UsuariosScreen } from './screens/UsuariosScreen';
 import { ViewerScreen } from './screens/ViewerScreen';
 import { PainelDeTelas } from './dev/PainelDeTelas';
@@ -117,6 +118,10 @@ export function App() {
       return <LoginScreen onSubmit={sessao.login} />;
     }
 
+    if (sessao.user?.mustChangePassword) {
+      return <TrocaSenhaScreen onSessionExpired={expirarSessao} onLogout={() => void sair()} onChanged={async () => { await sessao.refresh(); irPara('login'); setToast('Senha alterada. Entre novamente com a nova senha.'); }} />;
+    }
+
     if (demo.screen === 'viewer' && demo.studyId) {
       return (
         <ViewerScreen
@@ -142,10 +147,11 @@ export function App() {
       >
         {telaDoShell === 'exames' && <ExamesScreen state={worklist} onStateChange={setWorklist} onSessionExpired={expirarSessao} onAbrirExame={abrirExame} />}
         {telaDoShell === 'unidades' && sessao.user?.role === 'ADMIN' && <UnidadesScreen onSessionExpired={expirarSessao} />}
-        {telaDoShell === 'usuarios' && (
+        {telaDoShell === 'usuarios' && (sessao.user?.role === 'ADMIN' || sessao.user?.role === 'GESTOR') && (
           <UsuariosScreen
             key={demo.modalNovoMedico ? 'com-modal' : 'sem-modal'}
             modalInicial={demo.modalNovoMedico}
+            onSessionExpired={expirarSessao}
             onToast={setToast}
           />
         )}

@@ -44,7 +44,7 @@ export function AppShell({
   // Sem sessão o shell não é montado; este fallback só evita quebra visual.
   const nome = user?.name ?? '—';
   const perfil = user ? rotuloDePerfil(user.role) : '—';
-  const unidade = user?.unit?.name ?? 'Sem unidade';
+  const unidade = user?.role === 'ADMIN' ? 'Administração global' : user?.units?.map(unit => unit.name).join(' / ') || 'Sem unidade';
   const desde = horaDoUltimoAcesso(user?.lastLoginAt ?? null);
 
   // A barra lateral esconde a administração de quem não administra. Isto é

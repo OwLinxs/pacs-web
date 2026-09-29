@@ -28,12 +28,12 @@ type UserReader interface {
 	ByUsername(ctx context.Context, username string) (user.User, error)
 	ByID(ctx context.Context, id uuid.UUID) (user.User, error)
 	TouchLastLogin(ctx context.Context, id uuid.UUID, quando time.Time) error
-	UpdatePasswordHash(ctx context.Context, id uuid.UUID, hash string) error
+	CompareAndSwapPassword(ctx context.Context, id uuid.UUID, old, next string) (bool, error)
 }
 
 // SessionKeeper é o que o serviço precisa do armazenamento de sessões.
 type SessionKeeper interface {
-	Create(ctx context.Context, userID uuid.UUID, tokenHash []byte, expiraEm time.Time, origem SessionOrigin) (Session, error)
+	CreateVerified(context.Context, user.User, []byte, time.Time, SessionOrigin, time.Time) (Session, error)
 	Resolve(ctx context.Context, tokenHash []byte, idleTTL time.Duration, agora time.Time) (Session, user.User, error)
 	Revoke(ctx context.Context, tokenHash []byte, agora time.Time) error
 }
@@ -179,9 +179,9 @@ func (s *Service) Login(ctx context.Context, entrada LoginInput) (LoginResult, e
 	}
 
 	if precisaRehash {
-		if novoHash, err := s.hasher.Hash(entrada.Password); err == nil {
-			if err := s.users.UpdatePasswordHash(ctx, usuario.ID, novoHash); err != nil {
-				s.log.WarnContext(ctx, "não foi possível atualizar parâmetros do hash", "user_id", usuario.ID)
+		if next, e := s.hasher.Hash(entrada.Password); e == nil {
+			if changed, e := s.users.CompareAndSwapPassword(ctx, usuario.ID, usuario.PasswordHash, next); e == nil && changed {
+				usuario.PasswordHash = next
 			}
 		}
 	}
@@ -190,7 +190,7 @@ func (s *Service) Login(ctx context.Context, entrada LoginInput) (LoginResult, e
 	if err != nil {
 		return LoginResult{}, err
 	}
-	sessao, err := s.sessions.Create(ctx, usuario.ID, tokenHash, agora.Add(s.absoluteTTL), entrada.Origin)
+	sessao, err := s.sessions.CreateVerified(ctx, usuario, tokenHash, agora.Add(s.absoluteTTL), entrada.Origin, agora)
 	if err != nil {
 		return LoginResult{}, err
 	}

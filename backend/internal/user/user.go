@@ -21,7 +21,7 @@ var (
 )
 
 // padraoUsername espelha a restrição users_username_format da migration.
-var padraoUsername = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,63}$`)
+var padraoUsername = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{2,63}$`)
 
 // User é um usuário da aplicação.
 //
@@ -40,7 +40,9 @@ type User struct {
 	// UnitName vem de um join e fica vazio quando o usuário não tem unidade.
 	UnitName string
 
-	Active bool
+	MustChangePassword bool
+	Units              []UnitRef
+	Active             bool
 	// AccessValidUntil é o último dia de acesso permitido, inclusive.
 	// nil = sem prazo.
 	AccessValidUntil *time.Time
@@ -66,13 +68,10 @@ func (u User) CanAuthenticate(agora time.Time) (bool, MotivoBloqueio) {
 	if !u.Active {
 		return false, BloqueioInativo
 	}
-	if u.AccessValidUntil != nil {
-		// A validade é um dia inteiro: expira ao fim do dia informado.
-		limite := u.AccessValidUntil.AddDate(0, 0, 1)
-		if !agora.Before(limite) {
-			return false, BloqueioExpirado
-		}
+	if AccessExpired(u.AccessValidUntil, agora) {
+		return false, BloqueioExpirado
 	}
+
 	return true, ""
 }
 
@@ -106,7 +105,7 @@ func (n *NewUser) Validate() error {
 		return errors.New("nome deve ter no máximo 120 caracteres")
 	}
 	if !padraoUsername.MatchString(n.Username) {
-		return errors.New("username deve ter de 3 a 64 caracteres, em minúsculas, usando apenas letras, números, ponto, hífen ou sublinhado")
+		return errors.New("username deve ter de 3 a 64 caracteres, em minúsculas, usando apenas letras, números, hífen ou sublinhado")
 	}
 	if n.Email != "" {
 		if _, err := mail.ParseAddress(n.Email); err != nil {
@@ -126,4 +125,11 @@ func (n *NewUser) Validate() error {
 		return fmt.Errorf("validade de acesso inválida")
 	}
 	return nil
+}
+
+// UnitRef expõe somente metadados administrativos.
+type UnitRef struct {
+	ID     uuid.UUID `json:"id"`
+	Name   string    `json:"name"`
+	Active bool      `json:"active"`
 }

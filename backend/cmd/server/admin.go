@@ -48,7 +48,7 @@ func executarAdminCreate(ctx context.Context, log *slog.Logger, argumentos []str
 		fmt.Fprint(os.Stderr, `Cria o primeiro administrador do sistema.
 
 Uso:
-  pacs-server admin create -name "Administrador Teste" -username admin.teste
+  pacs-server admin create -name "Administrador Teste" -username admin_teste
 
 A senha é solicitada no terminal, sem eco. Em automação, envie-a pela entrada
 padrão:

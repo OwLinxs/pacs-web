@@ -226,6 +226,10 @@ func (s *Server) requireSession(proximo http.Handler) http.Handler {
 			return
 		}
 
+		if usuario.MustChangePassword && !passwordChangeAllowed(r) {
+			writeError(w, s.log, 403, "PASSWORD_CHANGE_REQUIRED", "Altere sua senha antes de continuar.")
+			return
+		}
 		ctx := context.WithValue(r.Context(), chaveUsuario, usuario)
 		ctx = context.WithValue(ctx, chaveSessao, sessao)
 		ctx = context.WithValue(ctx, chaveTokenSessao, token)

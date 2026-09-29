@@ -18,6 +18,7 @@ import (
 	"github.com/pmfb-saude/pacs-web/backend/internal/settings"
 	"github.com/pmfb-saude/pacs-web/backend/internal/units"
 	"github.com/pmfb-saude/pacs-web/backend/internal/user"
+	"github.com/pmfb-saude/pacs-web/backend/internal/useradmin"
 )
 
 // intervaloManutencao é a periodicidade da limpeza de sessões vencidas e de
@@ -78,6 +79,7 @@ func executarServe(ctx context.Context, log *slog.Logger) error {
 		Studies:   orthancClient,
 		Viewer:    orthancClient,
 		Units:     units.NewStore(pool),
+		Users:     useradmin.New(useradmin.NewStore(pool), auth.NewDefaultHasher()),
 		Auditoria: auditoria,
 	})
 	if err != nil {

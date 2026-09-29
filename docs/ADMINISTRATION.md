@@ -1,5 +1,10 @@
 # Administração V1 — Etapa 1: Unidades
 
+Estado informado pelo responsável: **implantada e validada em ambiente real**.
+Este documento mantém o histórico da Etapa 1. A Etapa 2 está documentada em
+[USERS.md](USERS.md); ela introduz os vínculos muitos-para-muitos e gerenciamento
+de usuários que ainda eram futuros no texto abaixo.
+
 ## Escopo e arquitetura
 
 `Administração → Unidades → API autenticada → internal/units → PostgreSQL da aplicação`.

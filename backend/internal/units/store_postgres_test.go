@@ -71,7 +71,7 @@ func TestStoreAndMigrationPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 2 {
+	if len(migrations) != 3 {
 		t.Fatal("atualize fixture para as migrations atuais")
 	}
 	if _, err := pool.Exec(ctx, migrations[0].SQL); err != nil {

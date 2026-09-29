@@ -1,5 +1,9 @@
 # Backend Go — PACS Web Municipal
 
+Atualização: Administração V1 Etapa 2 implementa usuários/múltiplas unidades,
+validade e troca obrigatória. Contratos, migration 0003 e limites de validação:
+[USERS.md](USERS.md). As seções históricas abaixo descrevem a fundação original.
+
 Fundação de autenticação da nova aplicação da Secretaria Municipal de Saúde de
 Francisco Beltrão. Esta etapa cobre usuários, perfis, senha, sessão, auditoria
 de acesso e a ligação do login existente ao backend.
@@ -325,7 +329,7 @@ cd backend && cp .env.example .env    # ajuste DATABASE_URL
 go run ./cmd/server migrate
 
 # 4. Primeiro administrador (a senha é pedida no terminal, sem eco)
-go run ./cmd/server admin create -name "Administrador Teste" -username admin.teste
+go run ./cmd/server admin create -name "Administrador Teste" -username admin_teste
 
 # 5. Backend
 go run ./cmd/server serve

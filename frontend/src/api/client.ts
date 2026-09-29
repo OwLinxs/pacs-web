@@ -16,6 +16,8 @@ export type SessionUser = {
   username: string;
   email?: string;
   role: Role;
+  mustChangePassword: boolean;
+  units: { id: string; name: string; active: boolean }[];
   unit: { id: string; name: string } | null;
   active: boolean;
   accessValidUntil: string | null;
@@ -231,7 +233,31 @@ export function studyIDFromRoute(path: string): string | null {
 export type Unit = { id: string; name: string; active: boolean; createdAt: string; updatedAt: string };
 export type UnitsPage = { items: Unit[]; limit: number; offset: number; hasMore: boolean; nextOffset: number | null };
 
+export type Validity = '1m' | '3m' | '6m' | '1y' | 'unlimited';
+export type ManagedUser = Omit<SessionUser, 'unit'> & { status: 'active' | 'inactive' | 'expired' };
+export type UsersQuery = { search?: string; role?: string; unitId?: string; status?: string; offset?: number };
+export type UsersPage = { items: ManagedUser[]; limit: number; offset: number; hasMore: boolean; nextOffset: number | null };
+export type UserInput = { name: string; username: string; email: string; unitIds: string[]; validity: Validity; initialPassword: string };
+function administrativeID(id: string) { if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)) throw new Error('Identificador inválido.'); return id; }
+
 export const api = {
+ async getUsers(query: UsersQuery, signal: AbortSignal): Promise<UsersPage> {
+  const params = new URLSearchParams({limit:'25'});
+  for (const [key,value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key,String(value));
+  return requisitar('GET', `/api/admin/users?${params}`, {signal});
+ },
+ async createUser(role: 'MEDICO' | 'GESTOR', input: UserInput, signal: AbortSignal): Promise<ManagedUser> {
+  const {name,username,email,unitIds,validity,initialPassword} = input;
+  return requisitar('POST', `/api/admin/users/${role === 'GESTOR' ? 'gestores' : 'medicos'}`, {body:{name,username,email,unitIds,validity,initialPassword},signal});
+ },
+ async editUser(id: string, input: {name:string;email:string;unitIds:string[]}, signal:AbortSignal):Promise<ManagedUser> {
+  const {name,email,unitIds}=input;
+  return requisitar('PATCH', `/api/admin/users/${administrativeID(id)}`,{body:{name,email,unitIds},signal});
+ },
+ async setUserActive(id:string,active:boolean,signal:AbortSignal):Promise<ManagedUser> { return requisitar('POST',`/api/admin/users/${administrativeID(id)}/active`,{body:{active},signal}); },
+ async renewUser(id:string,validity:Validity,signal:AbortSignal):Promise<ManagedUser> { return requisitar('POST',`/api/admin/users/${administrativeID(id)}/renew`,{body:{validity},signal}); },
+ async resetUserPassword(id:string,initialPassword:string,signal:AbortSignal):Promise<ManagedUser> { return requisitar('POST',`/api/admin/users/${administrativeID(id)}/reset-password`,{body:{initialPassword},signal}); },
+ async changePassword(currentPassword:string,newPassword:string,signal:AbortSignal):Promise<void> { return requisitar('POST','/api/auth/change-password',{body:{currentPassword,newPassword},signal}); },
   async getUnits(includeInactive: boolean, offset: number, signal: AbortSignal): Promise<UnitsPage> {
     return requisitar('GET', `/api/units?includeInactive=${includeInactive}&limit=50&offset=${offset}`, { signal });
   },

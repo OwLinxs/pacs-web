@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -23,7 +24,7 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 const camposSelecionados = `
     u.id, u.name, u.username, COALESCE(u.email, ''), u.password_hash, u.role,
     u.unit_id, COALESCE(un.name, ''), u.active, u.access_valid_until,
-    u.last_login_at, u.created_at, u.updated_at`
+    u.last_login_at, u.created_at, u.updated_at, u.must_change_password, ` + UnitsJSON
 
 // ByUsername busca por username já normalizado.
 func (s *Store) ByUsername(ctx context.Context, username string) (User, error) {
@@ -43,16 +44,20 @@ func (s *Store) ByID(ctx context.Context, id uuid.UUID) (User, error) {
 
 func (s *Store) buscarUm(ctx context.Context, consulta string, args ...any) (User, error) {
 	var u User
+	var unitsJSON []byte
 	err := s.pool.QueryRow(ctx, consulta, args...).Scan(
 		&u.ID, &u.Name, &u.Username, &u.Email, &u.PasswordHash, &u.Role,
 		&u.UnitID, &u.UnitName, &u.Active, &u.AccessValidUntil,
-		&u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt,
+		&u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt, &u.MustChangePassword, &unitsJSON,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
 	if err != nil {
 		return User{}, fmt.Errorf("buscar usuário: %w", err)
+	}
+	if json.Unmarshal(unitsJSON, &u.Units) != nil {
+		return User{}, fmt.Errorf("unidades inválidas")
 	}
 	return u, nil
 }
@@ -147,4 +152,13 @@ func (s *Store) UpdatePasswordHash(ctx context.Context, id uuid.UUID, hash strin
 		return ErrNotFound
 	}
 	return nil
+}
+
+// UnitsJSON requer alias u para users. A coluna legada não é fonte dos vínculos.
+const UnitsJSON = `COALESCE((SELECT jsonb_agg(jsonb_build_object('id', un2.id, 'name', un2.name, 'active', un2.active) ORDER BY lower(un2.name), un2.id) FROM user_units uu JOIN units un2 ON un2.id=uu.unit_id WHERE uu.user_id=u.id), '[]'::jsonb)`
+
+// CompareAndSwapPassword impede que rehash de login sobrescreva reset concorrente.
+func (s *Store) CompareAndSwapPassword(ctx context.Context, id uuid.UUID, old, next string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE users SET password_hash=$3,updated_at=now() WHERE id=$1 AND password_hash=$2`, id, old, next)
+	return tag.RowsAffected() == 1, err
 }

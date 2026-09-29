@@ -62,7 +62,7 @@ cd backend && env $(grep -v '^#' .env | grep -v '^$' | xargs) go run ./cmd/serve
 ```bash
 cd backend
 set -a && . ./.env && set +a
-go run ./cmd/server admin create -name "Seu Nome" -username seu.usuario
+go run ./cmd/server admin create -name "Seu Nome" -username seu_usuario
 ```
 
 A senha é pedida no terminal, sem eco, com confirmação. Mínimo 12 caracteres.

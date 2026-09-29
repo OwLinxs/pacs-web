@@ -224,3 +224,41 @@ func (a *Auditoria) Eventos() []audit.Event {
 	}
 	return eventos
 }
+
+func (u *Users) CompareAndSwapPassword(_ context.Context, id uuid.UUID, old, next string) (bool, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	v, ok := u.porID[id]
+	if !ok {
+		return false, user.ErrNotFound
+	}
+	if v.PasswordHash != old {
+		return false, nil
+	}
+	v.PasswordHash = next
+	u.porID[id] = v
+	u.porUsername[v.Username] = v
+	return true, nil
+}
+func (s *Sessions) CreateVerified(ctx context.Context, u user.User, hash []byte, expires time.Time, origin auth.SessionOrigin, now time.Time) (auth.Session, error) {
+	v, e := s.usuarios.ByID(ctx, u.ID)
+	if e != nil {
+		return auth.Session{}, auth.ErrCredenciaisInvalidas
+	}
+	ok, _ := v.CanAuthenticate(now)
+	if !ok || v.PasswordHash != u.PasswordHash {
+		return auth.Session{}, auth.ErrCredenciaisInvalidas
+	}
+	return s.Create(ctx, u.ID, hash, expires, origin)
+}
+func (s *Sessions) RevokeAllForUser(_ context.Context, id uuid.UUID, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, v := range s.porToken {
+		if v.UserID == id && v.RevokedAt == nil {
+			v.RevokedAt = &now
+			s.porToken[k] = v
+		}
+	}
+	return nil
+}

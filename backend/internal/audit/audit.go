@@ -20,6 +20,15 @@ type Event string
 
 // Eventos implementados nesta etapa.
 const (
+	EventUserCreated         Event = "USER_CREATED"
+	EventUserUpdated         Event = "USER_UPDATED"
+	EventUserActivated       Event = "USER_ACTIVATED"
+	EventUserDeactivated     Event = "USER_DEACTIVATED"
+	EventUserAccessRenewed   Event = "USER_ACCESS_RENEWED"
+	EventUserPasswordReset   Event = "USER_PASSWORD_RESET"
+	EventUserPasswordChanged Event = "USER_PASSWORD_CHANGED"
+	EventUserUnitsChanged    Event = "USER_UNITS_CHANGED"
+
 	EventUnitCreated     Event = "UNIT_CREATED"
 	EventUnitUpdated     Event = "UNIT_UPDATED"
 	EventUnitActivated   Event = "UNIT_ACTIVATED"
