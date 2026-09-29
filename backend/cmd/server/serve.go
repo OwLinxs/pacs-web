@@ -16,6 +16,7 @@ import (
 	"github.com/pmfb-saude/pacs-web/backend/internal/orthanc"
 	"github.com/pmfb-saude/pacs-web/backend/internal/secrets"
 	"github.com/pmfb-saude/pacs-web/backend/internal/settings"
+	"github.com/pmfb-saude/pacs-web/backend/internal/units"
 	"github.com/pmfb-saude/pacs-web/backend/internal/user"
 )
 
@@ -76,6 +77,7 @@ func executarServe(ctx context.Context, log *slog.Logger) error {
 		Orthanc:   orthancClient,
 		Studies:   orthancClient,
 		Viewer:    orthancClient,
+		Units:     units.NewStore(pool),
 		Auditoria: auditoria,
 	})
 	if err != nil {

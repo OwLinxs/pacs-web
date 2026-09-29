@@ -124,7 +124,7 @@ func (s *Server) cors(proximo http.Handler) http.Handler {
 			cabecalho.Set("Access-Control-Allow-Origin", origem)
 			cabecalho.Set("Access-Control-Allow-Credentials", "true")
 			cabecalho.Set("Access-Control-Allow-Headers", "Content-Type, "+headerCSRF)
-			cabecalho.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			cabecalho.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			cabecalho.Set("Vary", "Origin")
 		}
 		if r.Method == http.MethodOptions {

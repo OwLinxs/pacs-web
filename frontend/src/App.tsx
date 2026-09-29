@@ -9,6 +9,7 @@ import { SessaoExpiradaScreen, IndisponivelScreen } from './screens/EstadoSistem
 import { initialWorklist } from './worklist/model';
 import { ExamesScreen } from './screens/ExamesScreen';
 import { LoginScreen } from './screens/LoginScreen';
+import { UnidadesScreen } from './screens/UnidadesScreen';
 import { UsuariosScreen } from './screens/UsuariosScreen';
 import { ViewerScreen } from './screens/ViewerScreen';
 import { PainelDeTelas } from './dev/PainelDeTelas';
@@ -140,6 +141,7 @@ export function App() {
         onIndisponivel={() => irPara('indisponivel')}
       >
         {telaDoShell === 'exames' && <ExamesScreen state={worklist} onStateChange={setWorklist} onSessionExpired={expirarSessao} onAbrirExame={abrirExame} />}
+        {telaDoShell === 'unidades' && sessao.user?.role === 'ADMIN' && <UnidadesScreen onSessionExpired={expirarSessao} />}
         {telaDoShell === 'usuarios' && (
           <UsuariosScreen
             key={demo.modalNovoMedico ? 'com-modal' : 'sem-modal'}

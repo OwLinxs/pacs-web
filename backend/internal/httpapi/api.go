@@ -49,6 +49,7 @@ type Deps struct {
 	Orthanc  OrthancTester
 	Studies  StudyFinder
 	Viewer   ViewerClient
+	Units    UnitsStore
 	// Auditoria registra eventos administrativos. Opcional.
 	Auditoria AuditRecorder
 	// Now é opcional; o padrão é time.Now.
@@ -65,6 +66,7 @@ type Server struct {
 	orthanc   OrthancTester
 	studies   StudyFinder
 	viewer    ViewerClient
+	units     UnitsStore
 	auditoria AuditRecorder
 	now       func() time.Time
 
@@ -98,6 +100,7 @@ func New(deps Deps) (*Server, error) {
 		orthanc:   deps.Orthanc,
 		studies:   deps.Studies,
 		viewer:    deps.Viewer,
+		units:     deps.Units,
 		auditoria: deps.Auditoria,
 		now:       agora,
 		loginLimiter: newRateLimiter(
@@ -132,6 +135,10 @@ func (s *Server) montarRotas() http.Handler {
 	} {
 		mux.Handle(route, encadear(handler, s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor, user.RoleMedico)))
 	}
+
+	mux.Handle("GET /api/units", encadear(http.HandlerFunc(s.handleListUnits), s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor, user.RoleMedico)))
+	mux.Handle("POST /api/admin/units", encadear(http.HandlerFunc(s.handleCreateUnit), s.requireSession, s.requireRole(user.RoleAdmin)))
+	mux.Handle("PATCH /api/admin/units/{id}", encadear(http.HandlerFunc(s.handlePatchUnit), s.requireSession, s.requireRole(user.RoleAdmin)))
 
 	// Rota administrativa mínima, só para comprovar a autorização por perfil.
 	// Será substituída pelos endpoints reais de administração.

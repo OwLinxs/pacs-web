@@ -98,12 +98,14 @@ try {
   await until(()=>evaluate('document.body.textContent.includes("A data inicial deve ser anterior")'));
   const beforeInvalid=requests.length;await pause(500);assert.equal(requests.length,beforeInvalid);
   await set('Data inicial','2026-09-01');await set('Data final','2026-09-28');await queried(q=>q.dateFrom==='2026-09-01'&&q.dateTo==='2026-09-28');
-  await set('Modalidade','NEW');await queried(q=>q.modality==='NEW');
-  await set('Ordenação','dateAsc');await queried(q=>q.sort==='dateAsc');
-  await set('Estudos por página','50');await queried(q=>q.limit==='50'&&q.offset==='0');
-  await click('Próxima');await queried(q=>q.offset==='50');assert.ok((await body()).includes('Página 2'));assert.ok((await body()).includes('Fim dos resultados.'));
+  assert.equal(await evaluate(`document.querySelector('[aria-label="Modalidade"], [aria-label="Ordenação"], [aria-label="Estudos por página"]')`), null);
+  const sort = () => evaluate(`document.querySelector('button[aria-label^="Data / Hora:"]').click()`);
+  await sort();await queried(q=>q.sort==='dateAsc');
+  await sort();await queried(q=>q.sort==='dateDesc');
+  await sort();await queried(q=>q.sort==='dateAsc');
+  await click('Próxima');await queried(q=>q.offset==='25');assert.ok((await body()).includes('Página 2'));assert.ok((await body()).includes('Fim dos resultados.'));
   await click('Anterior');await queried(q=>q.offset==='0');
-  await click('Próxima');await queried(q=>q.offset==='50');
+  await click('Próxima');await queried(q=>q.offset==='25');
   // Navegação por teclado sem PHI no endereço e retorno preserva estado/offset.
   await evaluate(`document.querySelector('[aria-label="Abrir estudo"]').focus()`);
   await command('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
@@ -111,7 +113,7 @@ try {
   await until(()=>evaluate('location.pathname.startsWith("/viewer/")'));
   assert.equal(await evaluate('location.search'),'');
   await evaluate('history.back()');await ready();
-  assert.equal(await value('Pesquisar exames'),'SYNTH-ID');assert.equal(await value('Modalidade'),'NEW');assert.equal(await value('Ordenação'),'dateAsc');assert.equal(requests.at(-1).offset,'50');assert.equal(requests.at(-1).limit,'50');
+  assert.equal(await value('Pesquisar exames'),'SYNTH-ID');assert.equal(requests.at(-1).sort,'dateAsc');assert.equal(requests.at(-1).offset,'25');assert.equal(requests.at(-1).limit,'25');
   // Atualizar mantém tabela enquanto consulta e volta à primeira página.
   delay=600;await click('Atualizar');
   await until(()=>evaluate('document.body.textContent.includes("Atualizando…")'));
@@ -137,7 +139,7 @@ try {
   const stopped=requests.length;await pause(800);assert.equal(requests.length,stopped,'sem polling após expiração');
   assert.equal(failures.length,0,failures.join('\n'));assert.ok(network.filter(url=>url.startsWith('http')).every(url=>url.startsWith(origin)||url.includes('fonts.')));
 
-  console.log('PASS: Worklist V2 — busca, AND, períodos, validação, modalidade, ordem, paginação, refresh, navegação, tags ausentes, concorrência, unmount e sessão.');
+  console.log('PASS: Worklist V2 — busca, AND, períodos, validação, ordenação no cabeçalho, paginação, refresh, navegação, tags ausentes, concorrência, unmount e sessão.');
 } finally {
  socket?.close();chrome.kill();await once(chrome,'exit').catch(()=>{});server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(profile,{recursive:true,force:true});
 }

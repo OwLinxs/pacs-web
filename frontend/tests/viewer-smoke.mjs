@@ -173,6 +173,8 @@ try {
   await choose(0); await count('Imagem 1 / 3');
   await reopen();
   expireImage = true;
+  // O contador do viewport pode atualizar antes do effect que habilita a toolbar.
+  await until(()=>evaluate("Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==='Play'&&!b.disabled)"));
   await evaluate("Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Play').click()");
   await count('Sua sessão expirou por segurança.');
   const stoppedRequests = calls.length; await pause(400); assert.equal(calls.length, stoppedRequests, 'expiração durante Cine encerra requests');
@@ -189,19 +191,21 @@ try {
   await evaluate("document.querySelector('[role=button]').click()");
   await count('Imagem 1 / 3');
   const invertState=()=>evaluate("document.querySelector('[aria-label=Invert]').getAttribute('aria-pressed')");
-  const press=label=>evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.getAttribute('aria-label')===${JSON.stringify(label)} || b.textContent.trim()===${JSON.stringify(label)}).click()`);
-  assert.equal(await invertState(),'false','MONOCHROME1: estudo inicia OFF');
-  await press('Invert');assert.equal(await invertState(),'true','usuário pode ativar Invert');
-  await choose(1);await count('Imagem 1 / 2');assert.equal(await invertState(),'false','nova série inicia OFF');
-  await press('Invert');await press('Reset');assert.equal(await invertState(),'false','Reset retorna OFF');
+  const press=async label=>{await until(()=>evaluate(`Array.from(document.querySelectorAll('button')).some(b=>(b.getAttribute('aria-label')===${JSON.stringify(label)} || b.textContent.trim()===${JSON.stringify(label)})&&!b.disabled)`));await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.getAttribute('aria-label')===${JSON.stringify(label)} || b.textContent.trim()===${JSON.stringify(label)}).click()`);};
+  // report() usa um effect separado: espera a apresentação chegar à toolbar.
+  const expectInvert = value => until(async () => await invertState() === value);
+  await expectInvert('false');assert.equal(await invertState(),'false','MONOCHROME1: estudo inicia OFF');
+  await press('Invert');await expectInvert('true');assert.equal(await invertState(),'true','usuário pode ativar Invert');
+  await choose(1);await count('Imagem 1 / 2');await expectInvert('false');assert.equal(await invertState(),'false','nova série inicia OFF');
+  await press('Invert');await press('Reset');await expectInvert('false');assert.equal(await invertState(),'false','Reset retorna OFF');
   await press('1x2');await until(()=>evaluate("document.querySelector('[data-viewport=\"image-1\"]').textContent.includes('Imagem 1 / 3')"));
   const activePoint=await evaluate("(()=>{const r=document.querySelector('[data-viewport=\"image-1\"]').getBoundingClientRect();return {x:r.x+8,y:r.y+8}})()");
   await command('Input.dispatchMouseEvent',{type:'mousePressed',...activePoint,button:'left',buttons:1,clickCount:1});
   await command('Input.dispatchMouseEvent',{type:'mouseReleased',...activePoint,button:'left',buttons:0,clickCount:1});
-  assert.equal(await invertState(),'false','auto-layout/novo viewport inicia OFF');
+  await expectInvert('false');assert.equal(await invertState(),'false','auto-layout/novo viewport inicia OFF');
   await press('Invert');await choose(1);
   await until(()=>evaluate("document.querySelector('[data-viewport=\"image-1\"]').textContent.includes('Imagem 1 / 2')"));
-  assert.equal(await invertState(),'false','série em outro viewport inicia OFF');
+  await expectInvert('false');assert.equal(await invertState(),'false','série em outro viewport inicia OFF');
   console.log('PASS: Invert OFF inicial/Reset — MONOCHROME1, troca de série, auto-layout, outro viewport e ativação manual.');
   assert.equal(failures.length, 0);
   console.log(`PASS: Viewer V4 + regressão V2/V3 — stack sob demanda, setas/scroll, contador, troca de série, vazio, falha e seleção obsoleta. Screenshot: ${output}`);

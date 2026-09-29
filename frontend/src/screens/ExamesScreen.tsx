@@ -14,7 +14,6 @@ const PERIODS: { key: Period; label: string }[] = [
   { key: 'today', label: 'Hoje' }, { key: 'yesterday', label: 'Ontem' },
   { key: '7days', label: 'Últimos 7 dias' }, { key: '30days', label: 'Últimos 30 dias' }, { key: 'custom', label: 'Personalizado' },
 ];
-const COMMON_MODALITIES = ['CR', 'DX', 'CT', 'MR', 'US', 'MG', 'XA', 'RF', 'OT'];
 const COLUMNS = '110px minmax(140px,1.4fr) 105px 85px minmax(130px,1.4fr) 110px minmax(120px,1fr) 48px';
 
 /** Estado de filtros vive somente na memória de App durante a sessão. */
@@ -22,6 +21,7 @@ export function ExamesScreen({ state, onStateChange, onSessionExpired, onAbrirEx
   const [page, setPage] = useState<StudyPage | null>(null);
   const [status, setStatus] = useState<'loading' | 'refreshing' | 'ok' | 'error'>('loading');
   const [error, setError] = useState('');
+  const [unsupportedSort, setUnsupportedSort] = useState(false);
   const [updated, setUpdated] = useState<Date | null>(null);
   const [revision, setRevision] = useState(0);
   const [refresh, setRefresh] = useState(false);
@@ -34,6 +34,7 @@ export function ExamesScreen({ state, onStateChange, onSessionExpired, onAbrirEx
     setStatus(refresh ? 'refreshing' : 'loading');
     if (!refresh) setPage(null);
     setError('');
+    setUnsupportedSort(false);
     const timer = window.setTimeout(() => {
       void api.getStudies(JSON.parse(queryKey), controller.signal).then(result => {
         if (controller.signal.aborted) return;
@@ -42,6 +43,7 @@ export function ExamesScreen({ state, onStateChange, onSessionExpired, onAbrirEx
         if (controller.signal.aborted) return;
         if (cause instanceof ApiError && cause.status === 401) { onSessionExpired(); return; }
         setError(cause instanceof ApiError ? cause.message : 'Não foi possível consultar os exames. Verifique sua conexão.');
+        setUnsupportedSort(cause instanceof ApiError && cause.code === 'PACS_QUERY_UNSUPPORTED');
         setStatus('error'); setPage(null);
       });
     }, 350);
@@ -52,7 +54,6 @@ export function ExamesScreen({ state, onStateChange, onSessionExpired, onAbrirEx
   const filter = (key: SearchField | 'institutionName', value: string) => change({ filters: { ...state.filters, [key]: value } });
   const reload = () => { setRefresh(true); onStateChange({ ...state, offset: 0 }); setRevision(value => value + 1); };
   const busy = status === 'loading' || status === 'refreshing';
-  const options = modalities([...COMMON_MODALITIES, ...(page?.items.flatMap(item => item.modalities) ?? [])]);
   const text = (value: string) => value.trim() || '—';
   return (
     <div style={{ padding: '32px 40px 48px', display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 1520, minWidth: 1080 }}>
@@ -91,21 +92,17 @@ export function ExamesScreen({ state, onStateChange, onSessionExpired, onAbrirEx
       </div>}
       {!state.advanced && Object.entries(state.filters).some(([key, value]) => key !== state.field && value.trim()) &&
         <span style={{ fontSize: 13 }}>Há filtros adicionais ativos. Abra “Filtros avançados” para revisá-los.</span>}
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-        <label>Modalidade <input className="input" aria-label="Modalidade" list="worklist-modalities" placeholder="Todas" maxLength={16} style={{ width: 100 }} value={state.modality}
-          onChange={event => change({ modality: event.target.value.toUpperCase() })} /></label>
-        <datalist id="worklist-modalities">{options.map(value => <option key={value} value={value} />)}</datalist>
-        <label>Ordenação <select className="input" aria-label="Ordenação" value={state.sort} onChange={event => change({ sort: event.target.value as WorklistState['sort'] })}>
-          <option value="dateDesc">Mais recentes primeiro</option><option value="dateAsc">Mais antigos primeiro</option><option value="native">Ordem nativa do PACS</option>
-        </select></label>
-        <label style={{ marginLeft: 'auto' }}>Por página <select className="input" aria-label="Estudos por página" value={state.limit} onChange={event => change({ limit: Number(event.target.value) as 25 | 50 })}>
-          <option value={25}>25</option><option value={50}>50</option>
-        </select></label>
-      </div>
       <div className="blueprint" aria-busy={busy} style={{ position: 'relative' }}>
         <BlueprintCorners />
         <div style={{ display: 'grid', gridTemplateColumns: COLUMNS, gap: 12, padding: '14px 16px', fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid var(--color-divider)' }}>
-          {['Data / Hora', 'Paciente', 'ID', 'Modalidade', 'Descrição', 'Accession', 'Instituição', 'Séries'].map(label => <span key={label}>{label}</span>)}
+          <button type="button" className="pacs-hover-text"
+            aria-label={`Data / Hora: ${state.sort === 'dateAsc' ? 'mais antigos primeiro' : state.sort === 'native' ? 'ordem nativa' : 'mais recentes primeiro'}. Clique para alternar ordenação.`}
+            title={state.sort === 'dateAsc' ? 'Ordenar pelos mais recentes' : 'Ordenar pelos mais antigos'}
+            onClick={() => change({ sort: state.sort === 'dateAsc' ? 'dateDesc' : 'dateAsc' })}
+            style={{ padding: 0, border: 0, background: 'transparent', color: 'inherit', font: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            Data / Hora <span aria-hidden="true">{state.sort === 'dateAsc' ? '↑' : state.sort === 'native' ? '↕' : '↓'}</span>
+          </button>
+          {['Paciente', 'ID', 'Modalidade', 'Descrição', 'Accession', 'Instituição', 'Séries'].map(label => <span key={label}>{label}</span>)}
         </div>
         {page?.items.map(study => <div key={study.orthancStudyId} role="button" tabIndex={busy ? -1 : 0} aria-disabled={busy} className="pacs-hover-accent" aria-label="Abrir estudo"
           onClick={() => { if (!busy) onAbrirExame(study); }}
@@ -122,7 +119,8 @@ export function ExamesScreen({ state, onStateChange, onSessionExpired, onAbrirEx
         {status === 'loading' && <div style={{ padding: 48, textAlign: 'center' }}>Consultando exames…</div>}
         {status === 'ok' && page?.items.length === 0 && <div style={{ padding: 48, textAlign: 'center' }}>Nenhum estudo encontrado para os filtros selecionados.</div>}
         {status === 'error' && <div role="alert" style={{ padding: 40, textAlign: 'center' }}><p>{error}</p>
-          {!validation && <button className="btn btn-secondary" onClick={reload}>Tentar novamente</button>}</div>}
+          {!validation && <button className="btn btn-secondary" onClick={reload}>Tentar novamente</button>}
+          {unsupportedSort && <button className="btn btn-secondary" onClick={() => change({ sort: 'native', modality: '' })}>Usar ordem nativa do PACS</button>}</div>}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 14 }}>
         <button className="btn btn-secondary" disabled={busy || !!validation || state.offset === 0} onClick={() => { setRefresh(false); onStateChange({ ...state, offset: Math.max(0, state.offset - state.limit) }); }}>Anterior</button>

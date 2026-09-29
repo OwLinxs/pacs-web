@@ -23,7 +23,7 @@ Query string limitada a 4096 bytes.
 
 | Parâmetro | Regra |
 | --- | --- |
-| `limit` | 1–50, padrão 25; UI oferece 25 e 50 |
+| `limit` | 1–50, padrão 25; UI fixa em 25 |
 | `offset` | 0–10000, padrão 0 |
 | `dateFrom`, `dateTo` | Datas reais AAAA-MM-DD; inclusivas; início ≤ fim; API admite limites abertos |
 | `patientName`, `patientId`, `accessionNumber`, `studyDescription`, `institutionName` | Até 128 caracteres UTF-8; sem controles ou listas com barra invertida |
@@ -102,8 +102,8 @@ de ModalitiesInStudy com paginação. Versões desconhecidas/pré-release não s
 assumidas compatíveis para modalidade. Sem suporte, a consulta falha claramente;
 não remove o filtro silenciosamente.
 
-Opções da UI combinam sugestões comuns e modalidades da página recebida, com
-entrada livre de outros códigos válidos. Não representa catálogo global do PACS.
+O filtro de modalidade continua disponível na API, mas foi retirado da UI por
+preferência de apresentação. A coluna de modalidades continua visível.
 Estudos com múltiplas modalidades continuam exibindo todas, sem duplicatas e em
 ordem determinística; filtrar CT não oculta SR do mesmo estudo.
 
@@ -156,7 +156,12 @@ Não há controles internos da linha nem dashboard adicionado.
 
 ## Paginação, atualização, concorrência e retorno
 
-Limite padrão 25, opção 50; Anterior/Próxima, página atual e fim dos resultados.
+A UI usa 25 estudos por página, sem seletor de tamanho. Mantém Anterior/Próxima,
+página atual e fim dos resultados. O título Data / Hora é um botão acessível por
+clique e teclado, com seta indicando a ordem; alterna mais recentes/mais antigos
+e retorna à primeira página. Outros títulos não simulam ordenação local.
+Os controles avulsos de Ordenação, Modalidade e Por página foram removidos.
+Ordem nativa é oferecida apenas no erro de capacidade incompatível.
 `hasMore` usa uma sentinela, sem contagem total inventada. Offset máximo pode ter
 hasMore=true e nextOffset=null; a UI pede filtros mais restritos.
 Paginação por offset **não é snapshot**: ingestão/remoção entre páginas pode mover
@@ -201,8 +206,8 @@ lista de pacientes nem amplia a política de auditoria.
 - Node: cliente HTTP, períodos/calendário, consulta AND, validação, StudyDate,
   StudyTime parcial/inválida e modalidades genéricas/deduplicadas.
 - Chrome (`tests/worklist-browser.mjs`): tela inicial, busca/seletor, avançados,
-  todos os períodos, intervalo inválido sem consulta, modalidade desconhecida,
-  ordenação, anterior/próxima/tamanho, Atualizar/refreshing, vazio/erro/retry,
+  todos os períodos, intervalo inválido sem consulta, remoção dos controles avulsos,
+  ordenação no cabeçalho, anterior/próxima com 25 registros, Atualizar/refreshing, vazio/erro/retry,
   tags ausentes, abertura por teclado, retorno e preservação, debounce, resposta
   obsoleta, abort/unmount e expiração. Servidor e perfil temporários sintéticos.
 - Viewer: smoke V2/V3/V4 com DICOM sintético e cenário separado MONOCHROME1 para

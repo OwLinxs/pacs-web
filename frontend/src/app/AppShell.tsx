@@ -3,13 +3,14 @@ import { iniciaisDe, rotuloDePerfil, useSession } from '../auth/SessionProvider'
 import { Icon, type IconName } from '../design-system/Icon';
 
 /** Telas que vivem dentro do shell (sidebar + header). */
-export type AppScreen = 'exames' | 'usuarios' | 'auditoria' | 'configuracoes';
+export type AppScreen = 'exames' | 'usuarios' | 'auditoria' | 'configuracoes' | 'unidades';
 
 /** `apenasAdmin` esconde o item de quem não é ADMIN. */
 type NavItem = { key: AppScreen; icon: IconName; label: string; apenasAdmin?: boolean };
 
 const NAV_PRINCIPAL: NavItem[] = [{ key: 'exames', icon: 'file', label: 'Exames' }];
 const NAV_ADMIN: NavItem[] = [
+  { key: 'unidades', icon: 'layers', label: 'Unidades', apenasAdmin: true },
   { key: 'usuarios', icon: 'users', label: 'Usuários' },
   { key: 'auditoria', icon: 'shield', label: 'Auditoria' },
   { key: 'configuracoes', icon: 'settings', label: 'Configurações', apenasAdmin: true },

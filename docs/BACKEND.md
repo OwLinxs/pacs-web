@@ -427,3 +427,10 @@ docker compose restart app
 docker compose down          # para tudo, preservando o volume do banco
 docker compose down -v       # APAGA o banco — irreversível
 ```
+
+## Administração V1 — Etapa 1: Unidades
+
+Cadastro, edição de nome e ativação/desativação estão implementados, com gestão
+exclusiva de ADMIN. Consulte [ADMINISTRATION.md](ADMINISTRATION.md) para contrato,
+migration 0002, auditoria, compatibilidade com units/users legados e testes.
+Nenhuma associação usuário/unidade ou gestão de usuários foi adicionada.

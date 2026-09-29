@@ -47,7 +47,7 @@ function lerCookie(nome: string): string | null {
   return null;
 }
 
-type Metodo = 'GET' | 'POST' | 'PUT' | 'DELETE';
+type Metodo = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 type OpcoesRequisicao = {
   body?: unknown;
@@ -228,7 +228,20 @@ export function studyIDFromRoute(path: string): string | null {
   return match?.[1] ?? null;
 }
 
+export type Unit = { id: string; name: string; active: boolean; createdAt: string; updatedAt: string };
+export type UnitsPage = { items: Unit[]; limit: number; offset: number; hasMore: boolean; nextOffset: number | null };
+
 export const api = {
+  async getUnits(includeInactive: boolean, offset: number, signal: AbortSignal): Promise<UnitsPage> {
+    return requisitar('GET', `/api/units?includeInactive=${includeInactive}&limit=50&offset=${offset}`, { signal });
+  },
+  async createUnit(name: string, signal: AbortSignal): Promise<Unit> {
+    return requisitar('POST', '/api/admin/units', { body: { name }, signal });
+  },
+  async updateUnit(id: string, patch: { name?: string; active?: boolean }, signal: AbortSignal): Promise<Unit> {
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)) throw new Error('Unidade inválida.');
+    return requisitar('PATCH', `/api/admin/units/${id}`, { body: patch, signal });
+  },
   async getViewerSeries(studyId: string, signal: AbortSignal): Promise<{ items: ViewerSeries[] }> {
     return requisitar('GET', `/api/studies/${viewerResourceID(studyId)}/series`, { signal });
   },

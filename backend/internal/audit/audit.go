@@ -20,6 +20,11 @@ type Event string
 
 // Eventos implementados nesta etapa.
 const (
+	EventUnitCreated     Event = "UNIT_CREATED"
+	EventUnitUpdated     Event = "UNIT_UPDATED"
+	EventUnitActivated   Event = "UNIT_ACTIVATED"
+	EventUnitDeactivated Event = "UNIT_DEACTIVATED"
+
 	EventLoginSuccess Event = "LOGIN_SUCCESS"
 	EventLoginFailure Event = "LOGIN_FAILURE"
 	EventLogout       Event = "LOGOUT"
