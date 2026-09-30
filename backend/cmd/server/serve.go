@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/pmfb-saude/pacs-web/backend/internal/audit"
@@ -37,10 +38,17 @@ func executarServe(ctx context.Context, log *slog.Logger) error {
 	}
 	defer pool.Close()
 
-	// As migrations são só de avanço e nunca destrutivas; aplicá-las na subida
-	// mantém o banco em dia sem passo manual.
-	if err := database.Migrate(ctx, pool, log); err != nil {
-		return err
+	if cfg.IsProduction() {
+		if err := database.VerifyRuntimeRole(ctx, pool); err != nil {
+			return err
+		}
+		if err := database.VerifyMigrations(ctx, pool); err != nil {
+			return err
+		}
+	} else {
+		if err := database.Migrate(ctx, pool, log); err != nil {
+			return err
+		}
 	}
 
 	usuarios := user.NewStore(pool)
@@ -132,7 +140,7 @@ func executarServe(ctx context.Context, log *slog.Logger) error {
 	defer cancelar()
 
 	if err := servidor.Shutdown(desligarCtx); err != nil {
-		log.Error("encerramento não concluiu no prazo", "erro", err)
+		log.Error("encerramento não concluiu no prazo")
 		_ = servidor.Close()
 	}
 	<-manutencaoEncerrada
@@ -159,7 +167,7 @@ func iniciarManutencao(ctx context.Context, log *slog.Logger, sessoes *auth.Sess
 				removidas, err := sessoes.DeleteExpired(limparCtx, time.Now(), idleTTL)
 				cancelar()
 				if err != nil {
-					log.Error("falha ao limpar sessões vencidas", "erro", err)
+					log.Error("falha ao limpar sessões vencidas")
 					continue
 				}
 				if removidas > 0 {
@@ -172,11 +180,21 @@ func iniciarManutencao(ctx context.Context, log *slog.Logger, sessoes *auth.Sess
 }
 
 func executarMigrate(ctx context.Context, log *slog.Logger) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
+	env := os.Getenv("APP_ENV")
+	if env == "" {
+		env = string(config.EnvDevelopment)
 	}
-	pool, err := database.Open(ctx, database.DefaultConfig(cfg.DatabaseURL))
+	if env != string(config.EnvDevelopment) && env != string(config.EnvProduction) {
+		return errors.New("APP_ENV inválido")
+	}
+	url := os.Getenv("DATABASE_URL")
+	if env == string(config.EnvProduction) {
+		url = os.Getenv("MIGRATION_DATABASE_URL")
+	}
+	if url == "" {
+		return errors.New("DSN de migration ausente")
+	}
+	pool, err := database.Open(ctx, database.DefaultConfig(url))
 	if err != nil {
 		return err
 	}

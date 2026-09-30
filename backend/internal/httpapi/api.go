@@ -75,6 +75,7 @@ type Server struct {
 	now         func() time.Time
 
 	loginLimiter *rateLimiter
+	loginSlots   chan struct{}
 	handler      http.Handler
 }
 
@@ -114,6 +115,7 @@ func New(deps Deps) (*Server, error) {
 			deps.Config.LoginRateWindow,
 			agora,
 		),
+		loginSlots: make(chan struct{}, 2),
 	}
 	s.handler = s.montarRotas()
 	return s, nil

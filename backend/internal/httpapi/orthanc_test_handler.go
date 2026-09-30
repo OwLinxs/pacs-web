@@ -32,7 +32,7 @@ func (s *Server) handleTestOrthanc(w http.ResponseWriter, r *http.Request) {
 			_ = s.auditoria.Record(ctx, audit.Entry{
 				Event: audit.EventOrthancConnectionTested, ActorUserID: &user.ID,
 				ActorUsername: user.Username, UnitID: user.UnitID,
-				Detail: "PACS/Orthanc: " + outcome, Origin: ipDoPedido(r),
+				Detail: "PACS/Orthanc: " + outcome, Origin: s.ipDoPedido(r),
 			})
 		}
 	}()

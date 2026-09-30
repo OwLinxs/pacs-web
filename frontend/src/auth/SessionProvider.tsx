@@ -60,10 +60,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (!(erro instanceof ApiError) || erro.status !== 401) {
         throw erro;
       }
-    } finally {
-      setUser(null);
-      setStatus('anonymous');
     }
+    // Em falha de rede/servidor a sessão remota pode continuar válida.
+    setUser(null);
+    setStatus('anonymous');
   }, []);
 
   const valor = useMemo<SessionContextValue>(

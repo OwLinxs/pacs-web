@@ -42,7 +42,7 @@ func writeJSON(w http.ResponseWriter, log *slog.Logger, status int, corpo any) {
 		return
 	}
 	if err := json.NewEncoder(w).Encode(corpo); err != nil {
-		log.Warn("falha ao escrever resposta JSON", "erro", err)
+		log.Warn("falha ao escrever resposta JSON")
 	}
 }
 
@@ -51,10 +51,11 @@ func writeError(w http.ResponseWriter, log *slog.Logger, status int, codigo, men
 	writeJSON(w, log, status, errorEnvelope{Error: errorBody{Code: codigo, Message: mensagem}})
 }
 
-// writeInternalError registra o erro real e devolve uma resposta genérica.
-func writeInternalError(w http.ResponseWriter, log *slog.Logger, r *http.Request, err error) {
+// writeInternalError registra somente dados operacionais; erros internos podem
+// conter SQL, URLs ou valores sensíveis e não são serializados em log.
+func writeInternalError(w http.ResponseWriter, log *slog.Logger, r *http.Request, _ error) {
 	log.ErrorContext(r.Context(), "erro interno",
-		"metodo", r.Method, "rota", requestLogRoute(r), "erro", err)
+		"metodo", r.Method, "rota", requestLogRoute(r))
 	writeError(w, log, http.StatusInternalServerError, CodeInternal,
 		"Erro interno. Tente novamente; se persistir, contate o suporte de TI.")
 }

@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
-	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -67,7 +67,7 @@ func (s *Server) requestLogger(proximo http.Handler) http.Handler {
 			"rota", requestLogRoute(r),
 			"status", gravador.status,
 			"duracao_ms", s.now().Sub(inicio).Milliseconds(),
-			"ip", ipDoPedido(r),
+			"ip", s.ipDoPedido(r),
 		)
 	})
 }
@@ -105,7 +105,7 @@ func (s *Server) recoverPanic(proximo http.Handler) http.Handler {
 					panic(recuperado)
 				}
 				s.log.ErrorContext(r.Context(), "pânico no handler",
-					"metodo", r.Method, "rota", requestLogRoute(r), "panico", recuperado)
+					"metodo", r.Method, "rota", requestLogRoute(r))
 				writeError(w, s.log, http.StatusInternalServerError, CodeInternal,
 					"Erro interno. Tente novamente; se persistir, contate o suporte de TI.")
 			}
@@ -190,25 +190,28 @@ func (s *Server) csrfProtect(proximo http.Handler) http.Handler {
 // próprio host e contra as origens configuradas.
 func (s *Server) origemPermitida(r *http.Request) bool {
 	bruta := r.Header.Get("Origin")
+	fromOrigin := bruta != ""
 	if bruta == "" {
 		bruta = r.Header.Get("Referer")
 	}
 	if bruta == "" {
-		// Sem Origin nem Referer não há requisição cross-site iniciada por
-		// navegador; as demais camadas seguem valendo.
-		return true
+		return !s.cfg.IsProduction()
 	}
 	endereco, err := url.Parse(bruta)
-	if err != nil || endereco.Host == "" {
+	if err != nil || endereco.Host == "" || endereco.User != nil || (endereco.Scheme != "http" && endereco.Scheme != "https") {
 		return false
 	}
-	if endereco.Host == r.Host {
+	if fromOrigin && (endereco.Path != "" || endereco.RawQuery != "" || endereco.Fragment != "") {
+		return false
+	}
+	origem := endereco.Scheme + "://" + endereco.Host
+	if s.cfg.IsProduction() {
+		return origem == s.cfg.PublicOrigin && r.Host == endereco.Host
+	}
+	if origem == "http://"+r.Host || origem == "https://"+r.Host {
 		return true
 	}
-	return slices.ContainsFunc(s.cfg.AllowedOrigins, func(permitida string) bool {
-		outra, err := url.Parse(permitida)
-		return err == nil && outra.Host == endereco.Host && outra.Scheme == endereco.Scheme
-	})
+	return slices.Contains(s.cfg.AllowedOrigins, origem)
 }
 
 // requireSession exige sessão válida. Sessão ausente, expirada ou revogada
@@ -232,7 +235,7 @@ func (s *Server) requireSession(proximo http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), chaveUsuario, usuario)
-		ctx = audit.WithActor(ctx, audit.Actor{ID: usuario.ID, Username: usuario.Username, Origin: ipDoPedido(r)})
+		ctx = audit.WithActor(ctx, audit.Actor{ID: usuario.ID, Username: usuario.Username, Origin: s.ipDoPedido(r)})
 		ctx = context.WithValue(ctx, chaveSessao, sessao)
 		ctx = context.WithValue(ctx, chaveTokenSessao, token)
 		proximo.ServeHTTP(w, r.WithContext(ctx))
@@ -269,15 +272,42 @@ func encadear(handler http.Handler, middlewares ...func(http.Handler) http.Handl
 	return handler
 }
 
-// ipDoPedido devolve o IP do cliente. Não confia em X-Forwarded-For por
-// padrão: atrás de proxy, o endereço real precisa ser repassado pelo próprio
-// proxy na conexão (ou esta função precisará de configuração explícita).
-func ipDoPedido(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+// ipDoPedido só interpreta X-Forwarded-For quando o peer imediato está na
+// allowlist. Percorre a cadeia da direita para a esquerda e escolhe o primeiro
+// salto não confiável. Cabeçalhos malformados voltam ao peer imediato.
+func (s *Server) ipDoPedido(r *http.Request) string {
+	peer, err := netip.ParseAddrPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		return "unknown"
 	}
-	return host
+	ip := peer.Addr().Unmap()
+	trusted := func(addr netip.Addr) bool {
+		for _, prefix := range s.cfg.TrustedProxyCIDRs {
+			if prefix.Contains(addr) {
+				return true
+			}
+		}
+		return false
+	}
+	if !trusted(ip) {
+		return ip.String()
+	}
+	chain := r.Header.Get("X-Forwarded-For")
+	if len(chain) > 2048 {
+		return ip.String()
+	}
+	parts := strings.Split(chain, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		candidate, err := netip.ParseAddr(strings.TrimSpace(parts[i]))
+		if err != nil {
+			return peer.Addr().Unmap().String()
+		}
+		ip = candidate.Unmap()
+		if !trusted(ip) {
+			return ip.String()
+		}
+	}
+	return ip.String()
 }
 
 // prazoDeSessao devolve o instante de expiração absoluta para o cookie.
@@ -287,11 +317,8 @@ func (s *Server) prazoDeSessao(agora time.Time) time.Time {
 
 // Identificadores de estudo/série/instância não entram nos logs de requisição.
 func requestLogRoute(r *http.Request) string {
-	if strings.HasPrefix(r.URL.Path, "/api/studies/") {
-		return "/api/studies/{viewer-resource}"
+	if r.Pattern != "" {
+		return r.Pattern
 	}
-	if strings.HasPrefix(r.URL.Path, "/viewer/") {
-		return "/viewer/{studyID}"
-	}
-	return r.URL.Path
+	return "unmatched"
 }

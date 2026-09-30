@@ -4,7 +4,8 @@
 # Go, na mesma origem da API. Assim não há CORS, o cookie de sessão fica simples
 # (SameSite=Lax) e existe um só container para publicar.
 #
-# Este container é isolado: não se conecta a nenhuma rede do PACS em produção.
+# A aplicação compartilha apenas a rede Docker interna necessária para falar
+# com Orthanc; PostgreSQL da aplicação permanece separado do banco do PACS.
 
 # ── 1. Frontend ──────────────────────────────────────────────────────────────
 FROM node:22-alpine AS frontend

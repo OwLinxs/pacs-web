@@ -10,9 +10,8 @@ import (
 // Limitações conhecidas e aceitas nesta etapa:
 //   - vale por processo: com mais de uma instância, o limite é por instância;
 //   - zera ao reiniciar o servidor;
-//   - a memória é limitada por maxEntradas; ao estourar, as janelas vencidas são
-//     removidas e, se ainda estiver cheio, a requisição é permitida em vez de
-//     negar acesso por pressão de memória.
+//   - a memória é limitada por maxEntradas; ao estourar, novas chaves são
+//     negadas para que o limite nunca falhe aberto.
 //
 // Quando houver mais de uma instância, o caminho é mover o contador para o
 // PostgreSQL ou para o proxy.
@@ -58,9 +57,7 @@ func (rl *rateLimiter) Allow(chave string) (bool, time.Duration) {
 		if len(rl.janelas) >= rl.maximo {
 			rl.limparVencidasLocked(agora)
 			if len(rl.janelas) >= rl.maximo {
-				// Preferimos deixar passar a negar acesso ao sistema por
-				// limitação nossa de memória.
-				return true, 0
+				return false, rl.janela
 			}
 		}
 		rl.janelas[chave] = &janelaContagem{inicio: agora, tentativas: 1}

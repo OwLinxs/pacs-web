@@ -90,8 +90,14 @@ Flags:
 	}
 	defer pool.Close()
 
-	if err := database.Migrate(ctx, pool, log); err != nil {
-		return err
+	if cfg.IsProduction() {
+		if err := database.VerifyMigrations(ctx, pool); err != nil {
+			return err
+		}
+	} else {
+		if err := database.Migrate(ctx, pool, log); err != nil {
+			return err
+		}
 	}
 
 	usuarios := user.NewStore(pool)

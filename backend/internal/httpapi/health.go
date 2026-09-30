@@ -28,7 +28,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	defer cancelar()
 
 	if err := s.db.Ping(ctx); err != nil {
-		s.log.ErrorContext(ctx, "banco indisponível na checagem de prontidão", "erro", err)
+		s.log.ErrorContext(ctx, "banco indisponível na checagem de prontidão")
 		writeError(w, s.log, http.StatusServiceUnavailable, CodeUnavailable, "Serviço indisponível.")
 		return
 	}

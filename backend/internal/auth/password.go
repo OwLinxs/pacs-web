@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -81,6 +82,9 @@ func ValidatePassword(senha string) error {
 
 // Hash devolve o hash no formato PHC, com os parâmetros embutidos.
 func (h *Hasher) Hash(senha string) (string, error) {
+	if !validParams(h.params) || h.params.SaltLength == 0 || h.params.KeyLength == 0 {
+		return "", ErrHashInvalido
+	}
 	if err := ValidatePassword(senha); err != nil {
 		return "", err
 	}
@@ -104,6 +108,9 @@ func (h *Hasher) Hash(senha string) (string, error) {
 // O segundo retorno indica que o hash usa parâmetros mais fracos que os atuais
 // e deveria ser recalculado no próximo login bem-sucedido.
 func (h *Hasher) Verify(hashArmazenado, senha string) (ok bool, precisaRehash bool, err error) {
+	if len(senha) > maxPasswordLength {
+		return false, false, ErrSenhaFraca
+	}
 	params, sal, chaveEsperada, err := decodeHash(hashArmazenado)
 	if err != nil {
 		return false, false, err
@@ -125,37 +132,48 @@ func (h *Hasher) parametrosDesatualizados(usados Argon2Params) bool {
 }
 
 func decodeHash(hashArmazenado string) (Argon2Params, []byte, []byte, error) {
+	if len(hashArmazenado) > 512 {
+		return Argon2Params{}, nil, nil, ErrHashInvalido
+	}
 	partes := strings.Split(hashArmazenado, "$")
 	if len(partes) != 6 || partes[0] != "" || partes[1] != "argon2id" {
 		return Argon2Params{}, nil, nil, ErrHashInvalido
 	}
 
-	var versao int
-	if _, err := fmt.Sscanf(partes[2], "v=%d", &versao); err != nil {
+	if partes[2] != fmt.Sprintf("v=%d", argon2.Version) {
 		return Argon2Params{}, nil, nil, ErrHashInvalido
-	}
-	if versao != argon2.Version {
-		return Argon2Params{}, nil, nil, fmt.Errorf("%w: versão %d não suportada", ErrHashInvalido, versao)
 	}
 
-	var params Argon2Params
-	if _, err := fmt.Sscanf(partes[3], "m=%d,t=%d,p=%d", &params.Memory, &params.Time, &params.Parallelism); err != nil {
+	fields := strings.Split(partes[3], ",")
+	if len(fields) != 3 || !strings.HasPrefix(fields[0], "m=") || !strings.HasPrefix(fields[1], "t=") || !strings.HasPrefix(fields[2], "p=") {
 		return Argon2Params{}, nil, nil, ErrHashInvalido
 	}
-	if params.Memory == 0 || params.Time == 0 || params.Parallelism == 0 {
+	m, e1 := strconv.ParseUint(strings.TrimPrefix(fields[0], "m="), 10, 32)
+	t, e2 := strconv.ParseUint(strings.TrimPrefix(fields[1], "t="), 10, 32)
+	p, e3 := strconv.ParseUint(strings.TrimPrefix(fields[2], "p="), 10, 8)
+	if e1 != nil || e2 != nil || e3 != nil {
+		return Argon2Params{}, nil, nil, ErrHashInvalido
+	}
+	params := Argon2Params{Memory: uint32(m), Time: uint32(t), Parallelism: uint8(p)}
+	if !validParams(params) {
 		return Argon2Params{}, nil, nil, ErrHashInvalido
 	}
 
 	sal, err := base64.RawStdEncoding.DecodeString(partes[4])
-	if err != nil || len(sal) == 0 {
+	if err != nil || len(sal) < 8 || len(sal) > 64 {
 		return Argon2Params{}, nil, nil, ErrHashInvalido
 	}
 	chave, err := base64.RawStdEncoding.DecodeString(partes[5])
-	if err != nil || len(chave) == 0 {
+	if err != nil || len(chave) < 16 || len(chave) > 64 {
 		return Argon2Params{}, nil, nil, ErrHashInvalido
 	}
 
 	params.SaltLength = uint32(len(sal))
 	params.KeyLength = uint32(len(chave))
 	return params, sal, chave, nil
+}
+
+func validParams(p Argon2Params) bool {
+	return p.Memory >= 1024 && p.Memory <= 128*1024 && p.Time >= 1 && p.Time <= 6 && p.Parallelism >= 1 && p.Parallelism <= 4 &&
+		p.SaltLength <= 64 && p.KeyLength <= 64 && (p.SaltLength == 0 || p.SaltLength >= 8) && (p.KeyLength == 0 || p.KeyLength >= 16)
 }

@@ -12,7 +12,7 @@ func prepararAmbiente(t *testing.T) {
 	for _, chave := range []string{
 		"APP_ENV", "HTTP_ADDR", "DATABASE_URL", "SESSION_ABSOLUTE_TTL", "SESSION_IDLE_TTL",
 		"SHUTDOWN_TIMEOUT", "LOGIN_RATE_WINDOW", "LOGIN_RATE_ATTEMPTS", "ALLOWED_ORIGINS",
-		"COOKIE_SECURE", "STATIC_DIR", "PACS_MASTER_KEY",
+		"COOKIE_SECURE", "STATIC_DIR", "PACS_MASTER_KEY", "PUBLIC_ORIGIN", "TRUSTED_PROXY_CIDRS",
 	} {
 		t.Setenv(chave, "")
 	}
@@ -63,6 +63,8 @@ func TestLoadProducaoExigeCookieSecure(t *testing.T) {
 	prepararAmbiente(t)
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("PACS_MASTER_KEY", chaveMestraDeTeste)
+	t.Setenv("PUBLIC_ORIGIN", "https://pacs.example.invalid")
+	t.Setenv("TRUSTED_PROXY_CIDRS", "172.20.0.0/16")
 
 	cfg, err := Load()
 	if err != nil {
@@ -75,6 +77,33 @@ func TestLoadProducaoExigeCookieSecure(t *testing.T) {
 	t.Setenv("COOKIE_SECURE", "false")
 	if _, err := Load(); err == nil {
 		t.Error("desligar COOKIE_SECURE em produção deveria ser rejeitado")
+	}
+}
+
+func TestLoadPublicOriginEProxy(t *testing.T) {
+	prepararAmbiente(t)
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("PACS_MASTER_KEY", chaveMestraDeTeste)
+	t.Setenv("TRUSTED_PROXY_CIDRS", "172.20.0.0/16")
+	for _, origin := range []string{"", "http://pacs.example.invalid", "https://pacs.example.invalid/path", "https://user@pacs.example.invalid"} {
+		t.Setenv("PUBLIC_ORIGIN", origin)
+		if _, err := Load(); err == nil {
+			t.Errorf("origem %q deveria ser recusada", origin)
+		}
+	}
+	t.Setenv("PUBLIC_ORIGIN", "https://pacs.example.invalid")
+	t.Setenv("TRUSTED_PROXY_CIDRS", "172.20.0.0/16")
+	cfg, err := Load()
+	if err != nil || len(cfg.TrustedProxyCIDRs) != 1 {
+		t.Fatalf("configuração válida: %v", err)
+	}
+	t.Setenv("TRUSTED_PROXY_CIDRS", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("proxy não configurado aceito em produção")
+	}
+	t.Setenv("TRUSTED_PROXY_CIDRS", "not-a-cidr")
+	if _, err := Load(); err == nil {
+		t.Fatal("CIDR inválido aceito")
 	}
 }
 

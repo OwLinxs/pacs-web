@@ -118,6 +118,46 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) error {
 	return nil
 }
 
+// VerifyMigrations não executa DDL. O processo de runtime usa apenas uma
+// credencial sem privilégio de migration e recusa schema incompleto/divergente.
+func VerifyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
+	lista, err := LoadMigrations()
+	if err != nil {
+		return err
+	}
+	aplicadas, err := aplicadasPorVersao(ctx, pool)
+	if err != nil {
+		return fmt.Errorf("não foi possível verificar migrations")
+	}
+	for _, migration := range lista {
+		checksum, ok := aplicadas[migration.Version]
+		if !ok || checksum != migration.Checksum {
+			return fmt.Errorf("migration %04d ausente ou divergente", migration.Version)
+		}
+		delete(aplicadas, migration.Version)
+	}
+	if len(aplicadas) != 0 {
+		return fmt.Errorf("banco contém migration desconhecida")
+	}
+	return nil
+}
+
+// VerifyRuntimeRole impede startup em produção com conta privilegiada.
+func VerifyRuntimeRole(ctx context.Context, pool *pgxpool.Pool) error {
+	var privileged, schemaCreate, migrationWrite bool
+	err := pool.QueryRow(ctx, `SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls,
+		has_schema_privilege(current_user, 'public', 'CREATE'),
+		has_table_privilege(current_user, 'schema_migrations', 'INSERT, UPDATE, DELETE')
+		FROM pg_roles WHERE rolname = current_user`).Scan(&privileged, &schemaCreate, &migrationWrite)
+	if err != nil {
+		return fmt.Errorf("não foi possível verificar privilégio da conta runtime")
+	}
+	if privileged || schemaCreate || migrationWrite {
+		return fmt.Errorf("conta runtime possui privilégios administrativos")
+	}
+	return nil
+}
+
 func aplicadasPorVersao(ctx context.Context, pool *pgxpool.Pool) (map[int]string, error) {
 	linhas, err := pool.Query(ctx, `SELECT version, checksum FROM schema_migrations`)
 	if err != nil {

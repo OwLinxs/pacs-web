@@ -79,7 +79,7 @@ func paraUserResponse(u user.User) userResponse {
 
 // handleLogin autentica e abre a sessão.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	chave := ipDoPedido(r)
+	chave := s.ipDoPedido(r)
 	if permitido, faltando := s.loginLimiter.Allow(chave); !permitido {
 		segundos := int(faltando.Seconds()) + 1
 		w.Header().Set("Retry-After", strconv.Itoa(segundos))
@@ -108,6 +108,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(pedido.Username) > 64 || len(pedido.Password) > 1024 {
 		writeError(w, s.log, http.StatusBadRequest, CodeInvalidRequest, "Requisição inválida.")
+		return
+	}
+	select {
+	case s.loginSlots <- struct{}{}:
+		defer func() { <-s.loginSlots }()
+	default:
+		w.Header().Set("Retry-After", "2")
+		writeError(w, s.log, http.StatusTooManyRequests, CodeRateLimited, "Muitas tentativas. Aguarde e tente novamente.")
 		return
 	}
 

@@ -3,14 +3,13 @@
 # A imagem `pacs-web` traz o frontend compilado e o backend Go: o próprio
 # backend serve o SPA na mesma origem da API.
 #
-# Isolamento: rede e volume próprios deste projeto. NÃO conecte este compose à
-# rede do PACS em produção, e não aponte DATABASE_URL para o PostgreSQL interno
-# do Orthanc — são sistemas diferentes.
+# PostgreSQL próprio e rede interna com Orthanc somente para comunicação PACS.
+# DATABASE_URL nunca deve apontar para o banco interno do Orthanc.
 #
 # Uso:
 #   cp .env.compose.example .env      # preencha os valores
-#   docker compose up -d --build
-#   docker compose exec app pacs-server admin create -name "..." -username ...
+# Provisionar primeiro a role runtime e aplicar migrations com credencial
+# separada; instruções em docs/HARDENING.md. Este arquivo não faz deploy.
 
 name: pacs-web
 
@@ -27,7 +26,9 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      DATABASE_URL: postgres://${POSTGRES_USER:-pacsweb}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pacsweb}?sslmode=disable
+      DATABASE_URL: ${APP_DATABASE_URL:?defina APP_DATABASE_URL com role runtime sem DDL}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?defina PUBLIC_ORIGIN HTTPS}
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
       # Em produção o cookie exige HTTPS; o TLS termina no proxy da Prefeitura.
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       SESSION_ABSOLUTE_TTL: ${SESSION_ABSOLUTE_TTL:-12h}

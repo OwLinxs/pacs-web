@@ -52,7 +52,7 @@ Roteamento, JSON, logging (`log/slog`), embed das migrations e testes usam só a
 biblioteca padrão. Não há framework HTTP, nem ORM, nem biblioteca de logging
 externa, nem ferramenta externa de migration.
 
-### Decisão a validar: runner de migrations próprio
+### Runner de migrations
 
 As migrations são arquivos `NNNN_descricao.sql` embutidos no binário e aplicados
 por um runner de ~120 linhas (`internal/database/migrate.go`): tabela de
@@ -205,6 +205,9 @@ Todas por ambiente; veja `backend/.env.example`. Nunca comite `.env`.
 | `HTTP_ADDR` | endereço de escuta |
 | `LOG_LEVEL` | `debug`/`info`/`warn`/`error` |
 | `DATABASE_URL` | PostgreSQL **da nova aplicação** |
+| `MIGRATION_DATABASE_URL` | somente `migrate` em produção; não injetar no `serve` |
+| `PUBLIC_ORIGIN` | origem HTTPS exata, obrigatória em produção |
+| `TRUSTED_PROXY_CIDRS` | peers proxy explícitos, obrigatório em produção |
 | `SESSION_ABSOLUTE_TTL`, `SESSION_IDLE_TTL` | prazos de sessão |
 | `COOKIE_SECURE` | obrigatório em produção |
 | `ALLOWED_ORIGINS` | origens de CORS, explícitas; vazio quando a origem é a mesma |
@@ -300,23 +303,20 @@ fica simples e existe um só container para o proxy da Prefeitura encaminhar.
 - `STATIC_DIR=/srv/frontend` e `HTTP_ADDR=0.0.0.0:8080` já vêm na imagem; o resto
   da configuração vem do ambiente em execução — nunca da imagem.
 - `HEALTHCHECK` consulta `/health`.
-- As migrations vão embutidas no binário e são aplicadas na subida.
+- As migrations vão embutidas no binário. Em produção, `serve` só verifica
+  versões/checksums; o comando `migrate` usa `MIGRATION_DATABASE_URL` separada.
 
 ```bash
 docker build -t pacs-web:latest .
 
-# Aplicação + banco, em rede e volume próprios deste projeto
-cp .env.compose.example .env      # preencha POSTGRES_PASSWORD
-docker compose up -d --build
-
-# Primeiro administrador, dentro do container
-docker compose exec app pacs-server admin create -name "<nome>" -username <username>
+# O procedimento de implantação e provisionamento da role runtime está em HARDENING.md.
+# Não executar docker compose up antes de aplicar migrations separadamente.
 ```
 
 `docker-compose.yml` publica a aplicação apenas em `127.0.0.1`: quem expõe para a
-rede é o proxy já existente, que também termina o TLS. **Não conecte este compose
-à rede do PACS em produção** e não aponte `DATABASE_URL` para o PostgreSQL
-interno do Orthanc.
+rede é o proxy já existente, que também termina o TLS. O app participa da rede
+Docker interna do Orthanc somente para a API PACS; o PostgreSQL da aplicação
+permanece separado do banco interno do Orthanc. Veja [HARDENING.md](HARDENING.md).
 
 ## Execução local
 
@@ -392,8 +392,8 @@ Os testes não precisam de PostgreSQL: usam as implementações em memória de
   credenciais.
 - Não há comando de redefinição de senha (`admin reset-password`).
 - Rate limit por processo e em memória (ver acima).
-- `X-Forwarded-For` não é considerado: atrás de proxy, o IP registrado é o da
-  conexão. Quando houver proxy, isso precisa de configuração explícita.
+- `X-Forwarded-For` é considerado somente para peer em `TRUSTED_PROXY_CIDRS`;
+  a configuração e o NPM precisam ser validados em ambiente controlado.
 - A auditoria de logout não registra origem (o IP não é propagado até ali).
 - Sem DICOMweb; Cornerstone3D recebe DICOM Part 10 pelo gateway autenticado.
 - Sem golangci-lint: `gofmt` e `go vet` bastam para este tamanho.

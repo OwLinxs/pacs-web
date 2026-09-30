@@ -52,8 +52,8 @@ func main() {
 	}
 
 	if err != nil {
-		// A mensagem já é sanitizada nas camadas internas.
-		log.Error("encerrando com erro", "comando", comando, "erro", err)
+		// Erros de driver/infraestrutura podem conter URLs ou valores sensíveis.
+		log.Error("encerrando com erro", "comando", comando)
 		os.Exit(1)
 	}
 }

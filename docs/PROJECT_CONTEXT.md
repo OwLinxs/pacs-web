@@ -184,9 +184,11 @@ Cleanup de timers, listeners, observers, grupos/engine e requests deve ser manti
 ## Banco e migrations — 0001, 0002 e 0003 aplicadas
 
 Runner em `internal/database/migrate.go`, SQL embutido, checksum SHA-256,
-`schema_migrations`, uma transação por migration, somente avanço. **Serve aplica
-migrations pendentes na inicialização**; não iniciar backend contra banco existente
-para simples inspeção. **0001, 0002, 0003 e 0004 já estão aplicadas no ambiente atual**,
+`schema_migrations`, uma transação por migration, somente avanço. **Após o hardening
+local, `serve` em produção apenas verifica checksums/versões e exige role runtime
+sem DDL; `migrate` exige credencial separada. Esta alteração ainda não foi
+implantada.** Em desenvolvimento, `serve` ainda aplica migrations pendentes.
+**0001, 0002, 0003 e 0004 já estão aplicadas no ambiente atual**,
 conforme confirmação do responsável; 0002/0003 também foram validadas funcionalmente.
 São imutáveis: não editar esses arquivos nem seus checksums. Qualquer alteração
 futura de schema deve utilizar nova migration. Auditoria V1 acrescentou 0004, também aplicada e validada posteriormente no ambiente real conforme o responsável.
@@ -357,45 +359,13 @@ falha no segundo evento. Frontend typecheck/build, 31 testes Node e Chrome Audit
 Usuários, Unidades, Worklist e Viewer V2/V3/V4 + Invert OFF passaram. Fixtures
 sintéticas; nenhum banco existente ou Orthanc real acessado. Detalhes: [AUDIT.md](AUDIT.md).
 
-## Dívidas técnicas e hardening — pendências restantes
+## Hardening pré-produção — implementado localmente, não implantado
 
-Manter visíveis para pré-produção:
+Ver [HARDENING.md](HARDENING.md) para configuração operacional e revisão individual dos avisos npm. As alterações locais não foram aplicadas no ambiente real. `serve` em produção agora verifica migrations/checksums e privilégio da role runtime sem executar DDL; `migrate` exige DSN privilegiada separada. O Compose recebe `APP_DATABASE_URL` da role runtime. `PUBLIC_ORIGIN` HTTPS e `TRUSTED_PROXY_CIDRS` explícitos são obrigatórios em produção. Rate limit falha fechado na saturação, usa X-Forwarded-For somente de peers confiáveis e restringe Argon2 a dois logins simultâneos; parser PHC possui tetos. CSRF em produção exige Origin/Referer da origem pública HTTPS. Erros/panics e paths arbitrários não entram nos logs; logout local aguarda confirmação da revogação remota. `.dockerignore` cobre raiz e subdiretórios. `fflate` 0.7.5 foi fixado sem upgrade major; audit passou de 12 para 10 pacotes reportados.
 
-- **Auditoria:** atomicidade administrativa da V1 validada no ambiente real conforme
-  responsável; a extensão de exportação V5 ainda exige validação controlada. Login/logout/teste PACS seguem best-effort; revisar confiabilidade
-  desses fluxos, origem do logout, retenção e privilégios SQL antes de produção.
-- **PostgreSQL:** revisar usuário da aplicação e privilégio mínimo, separando
-  necessidades de operação e migrations; não inferir permissões reais do Compose.
-- **Login/Argon2id:** rate limit em memória por processo, IP da conexão atrás de
-  reverse proxy (sem confiar arbitrariamente em headers), proteção contra abuso
-  computacional e limites de concorrência. O parser atual verifica parâmetros
-  não nulos, mas não impõe tetos seguros de memória/iterações/paralelismo/tamanhos.
-- **CSRF/Origin:** revisar política; código permite ausência de Origin/Referer
-  e compara somente Host no caminho same-host, sem exigir igualdade de esquema.
-  A descrição resumida de proteção em camadas não elimina essas limitações.
-- **Banco:** revisar deadlines de queries e cobertura de contextos; Unidades e
-  Usuários têm timeouts explícitos, o que não comprova cobertura de todo o backend.
-- **Concorrência:** revisar gravação de configurações e migrations. Proteção de
-  resultado de teste Orthanc por revisão não garante atomicidade de toda edição;
-  runner tem transações/checksums, mas não lock global entre instâncias concorrentes.
-- **Logs:** revisar sanitização de erros internos/SQL/panics e dos proxies; o
-  logger HTTP omite query/corpo, mas isso não prova sanitização de todos os caminhos.
-- **Frontend/dependências:** revisar vulnerabilidades npm sem audit fix automático.
-  Warnings de chunks Vite grandes e módulos Node externalizados permanecem;
-  números antigos de vulnerabilidades não equivalem a uma auditoria atualizada.
-- **Build:** revisar `.dockerignore` continuamente; já contém `**/.env` e
-  `**/.env.*`, cobrindo variantes em subdiretórios, inclusive backend/.env.
-  Não registrar a correção anterior como ausente nem presumir hardening completo.
-- **Logout:** `SessionProvider` limpa o estado local no finally mesmo quando o
-  servidor falha. Isso não garante revogação remota; revisar UX e consistência.
-- **Secrets:** conforme informado pelo responsável, credenciais/secrets reais
-  expostos anteriormente exigem rotação controlada antes da produção, seguindo
-  as orientações de hardening, sem reproduzir valores. Trocar a chave de cifra
-  exige tratar as credenciais Orthanc já cifradas; não rotacionar nesta tarefa.
+Ainda pendem **antes da produção**: provisionar/testar role runtime e grants mínimos; configurar e validar NPM/HTTPS/proxy CIDR/Host/forwarded headers; rotação controlada de credenciais/secrets anteriormente expostos (inclusive regravação segura da credencial Orthanc sob nova chave); validação browser real dos novos controles e revisão dos 10 avisos npm restantes com base no upstream. Rate limit é por processo, portanto escalonamento horizontal requer controle adicional no proxy. Não houve rotação, migration ou deploy nesta etapa.
 
-Não foi localizado arquivo dedicado de hardening entre os documentos versionados
-consultados. Esta seção consolida as pendências solicitadas e as limitações de
-BACKEND/USERS/ORTHANC_CONNECTION; não afirma que uma rotação já ocorreu.
+Permanecem como dívidas não resolvidas por este escopo: deadlines de todas as queries, concorrência de edição das configurações e entre runners de migration, política de retenção da auditoria, eventos não transacionais best-effort (login/logout/teste PACS), warnings de bundle Vite e revisão de logs/configuração no proxy. Viewer V5 segue local e requer validação controlada.
 
 ## Divergências e trechos históricos que não devem orientar novas implementações
 
@@ -410,9 +380,8 @@ BACKEND/USERS/ORTHANC_CONNECTION; não afirma que uma rotação já ocorreu.
   posterior. Há descrição antiga de Reset recuperando invert nativo; o código
   `viewer/cornerstone.ts` explicitamente força false, como a correção documentada
   no início do arquivo. Invert inicial/Reset OFF é a decisão vigente.
-- BACKEND.md e comentário do Dockerfile descrevem isolamento de qualquer rede do
-  PACS; o Compose atual conecta app à rede externa do PACS para integração interna.
-  Não confundir a separação do PostgreSQL da aplicação com ausência dessa conexão.
+- Registros históricos podem descrever ausência de rede PACS; o Compose conecta
+  o app à rede externa do Orthanc para a API interna. O PostgreSQL permanece separado.
 - DECISOES.md contém decisão histórica de conta compartilhada por unidade. O
   modelo vigente possui usuários MEDICO/GESTOR com múltiplas unidades e senha
   individual/troca obrigatória; não implementar contas compartilhadas com base

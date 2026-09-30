@@ -8,6 +8,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -39,7 +41,9 @@ type Config struct {
 	// AllowedOrigins habilita CORS apenas para origens explícitas. Em
 	// desenvolvimento o caminho recomendado é o proxy do Vite (mesma origem),
 	// então normalmente fica vazio.
-	AllowedOrigins []string
+	AllowedOrigins    []string
+	PublicOrigin      string
+	TrustedProxyCIDRs []netip.Prefix
 
 	// CookieSecure marca os cookies como Secure. Obrigatório em produção.
 	CookieSecure bool
@@ -75,6 +79,7 @@ func Load() (Config, error) {
 		ShutdownTimeout:    15 * time.Second,
 		StaticDir:          os.Getenv("STATIC_DIR"),
 		MasterKey:          os.Getenv("PACS_MASTER_KEY"),
+		PublicOrigin:       strings.TrimSpace(os.Getenv("PUBLIC_ORIGIN")),
 	}
 
 	var problemas []string
@@ -104,6 +109,9 @@ func Load() (Config, error) {
 	if err := intEnv("LOGIN_RATE_ATTEMPTS", &cfg.LoginRateAttempts); err != nil {
 		problemas = append(problemas, err.Error())
 	}
+	if cfg.LoginRateAttempts > 20 || cfg.LoginRateWindow < time.Minute {
+		problemas = append(problemas, "LOGIN_RATE_ATTEMPTS deve ser <= 20 e LOGIN_RATE_WINDOW >= 1m")
+	}
 
 	if origens := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS")); origens != "" {
 		for _, origem := range strings.Split(origens, ",") {
@@ -111,12 +119,34 @@ func Load() (Config, error) {
 			if origem == "" {
 				continue
 			}
-			if !strings.HasPrefix(origem, "http://") && !strings.HasPrefix(origem, "https://") {
+			if !validOrigin(origem) {
 				problemas = append(problemas, fmt.Sprintf("ALLOWED_ORIGINS: %q não é uma origem absoluta", origem))
 				continue
 			}
 			cfg.AllowedOrigins = append(cfg.AllowedOrigins, origem)
 		}
+	}
+	if cfg.PublicOrigin != "" && !validOrigin(cfg.PublicOrigin) {
+		problemas = append(problemas, "PUBLIC_ORIGIN deve conter somente scheme e host de uma origem absoluta")
+	}
+	if cfg.Env == EnvProduction && !strings.HasPrefix(cfg.PublicOrigin, "https://") {
+		problemas = append(problemas, "PUBLIC_ORIGIN HTTPS é obrigatória em produção")
+	}
+	if cfg.Env == EnvProduction && len(cfg.AllowedOrigins) > 0 {
+		problemas = append(problemas, "ALLOWED_ORIGINS deve ficar vazio em produção")
+	}
+	if bruto := strings.TrimSpace(os.Getenv("TRUSTED_PROXY_CIDRS")); bruto != "" {
+		for _, item := range strings.Split(bruto, ",") {
+			prefixo, err := netip.ParsePrefix(strings.TrimSpace(item))
+			if err != nil {
+				problemas = append(problemas, "TRUSTED_PROXY_CIDRS contém CIDR inválido")
+				continue
+			}
+			cfg.TrustedProxyCIDRs = append(cfg.TrustedProxyCIDRs, prefixo.Masked())
+		}
+	}
+	if cfg.Env == EnvProduction && len(cfg.TrustedProxyCIDRs) == 0 {
+		problemas = append(problemas, "TRUSTED_PROXY_CIDRS é obrigatório em produção")
 	}
 
 	// Em produção o cookie é sempre Secure; em desenvolvimento permite HTTP local.
@@ -149,6 +179,11 @@ func Load() (Config, error) {
 
 // IsProduction indica se o processo roda em produção.
 func (c Config) IsProduction() bool { return c.Env == EnvProduction }
+
+func validOrigin(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == ""
+}
 
 func getenv(chave, padrao string) string {
 	if valor := os.Getenv(chave); valor != "" {
