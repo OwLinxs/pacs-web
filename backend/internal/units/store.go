@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pmfb-saude/pacs-web/backend/internal/audit"
 )
 
 type Store struct{ pool *pgxpool.Pool }
@@ -48,7 +49,22 @@ func (s *Store) Create(ctx context.Context, name string) (Unit, error) {
 	id := uuid.New()
 	// slug/kind são colunas legadas obrigatórias. Não viram campos novos da API/UI.
 	// Slug técnico estável, independente do nome, mantém contratos legados intactos.
-	return scan(s.pool.QueryRow(ctx, `INSERT INTO units (id,slug,name,kind) VALUES ($1,$2,$3,'OUTRO') RETURNING `+columns, id, "unit-"+id.String(), name))
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Unit{}, ErrUnavailable
+	}
+	defer tx.Rollback(ctx)
+	made, err := scan(tx.QueryRow(ctx, `INSERT INTO units (id,slug,name,kind) VALUES ($1,$2,$3,'OUTRO') RETURNING `+columns, id, "unit-"+id.String(), name))
+	if err != nil {
+		return Unit{}, err
+	}
+	if err = record(ctx, tx, id, audit.EventUnitCreated, "unidade criada"); err != nil {
+		return Unit{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return Unit{}, ErrUnavailable
+	}
+	return made, nil
 }
 
 // Update bloqueia a linha para aplicar apenas campos enviados e informar à
@@ -83,6 +99,20 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, patch Patch) (Unit, Un
 			return Unit{}, Unit{}, err
 		}
 	}
+	if before.Name != after.Name {
+		if err = record(ctx, tx, id, audit.EventUnitUpdated, "nome alterado"); err != nil {
+			return Unit{}, Unit{}, err
+		}
+	}
+	if before.Active != after.Active {
+		event := audit.EventUnitDeactivated
+		if after.Active {
+			event = audit.EventUnitActivated
+		}
+		if err = record(ctx, tx, id, event, "estado ativo alterado"); err != nil {
+			return Unit{}, Unit{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Unit{}, Unit{}, storeError(err)
 	}
@@ -108,4 +138,17 @@ func storeError(err error) error {
 		return ErrDuplicate
 	}
 	return ErrUnavailable
+}
+
+func record(ctx context.Context, tx pgx.Tx, id uuid.UUID, event audit.Event, detail string) error {
+	e := audit.FromContext(ctx, event)
+	if e.ActorUserID == nil {
+		return ErrUnavailable
+	}
+	e.UnitID = &id
+	e.Detail = detail
+	if audit.RecordTx(ctx, tx, e) != nil {
+		return ErrUnavailable
+	}
+	return nil
 }

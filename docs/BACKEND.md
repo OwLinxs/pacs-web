@@ -1,5 +1,9 @@
 # Backend Go — PACS Web Municipal
 
+Atualização Auditoria V1: consulta somente ADMIN, allowlist de detalhes e eventos
+administrativos atômicos. Migration 0004 somente para índice de alvo. Implementada
+sem deploy/validação real; contrato e limitações em [AUDIT.md](AUDIT.md).
+
 Atualização: Administração V1 Etapa 2 implementa usuários/múltiplas unidades,
 validade e troca obrigatória. Contratos, migration 0003 e limites de validação:
 [USERS.md](USERS.md). As seções históricas abaixo descrevem a fundação original.
@@ -276,9 +280,10 @@ proxies de ambiente. Consulte a política detalhada no documento do teste.
 
 ### Auditoria
 
-Toda gravação registra `ORTHANC_SETTINGS_CHANGED` com o autor, a origem e **quais
-campos mudaram** — nunca valores de credencial. Alterar a configuração zera o
-status de verificação anterior.
+Toda gravação registra `ORTHANC_SETTINGS_CHANGED` na mesma transação da
+configuração, com autor, origem e contexto fixo “configuração atualizada”.
+A lista histórica de campos foi substituída por contexto mínimo, sem valores.
+Alterar a configuração continua zerando o status de verificação anterior.
 
 O teste registra `ORTHANC_CONNECTION_TESTED` com uma categoria operacional
 sanitizada. Status e data/hora são persistidos no JSONB existente, sem migration.

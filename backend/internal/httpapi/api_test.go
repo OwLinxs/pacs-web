@@ -42,6 +42,7 @@ type cenario struct {
 }
 
 type opcoesCenario struct {
+	auditReader     httpapi.AuditReader
 	tentativasLogin int
 	orthanc         httpapi.OrthancTester
 	studies         httpapi.StudyFinder
@@ -87,15 +88,16 @@ func montarCenario(t *testing.T, opcoes opcoesCenario) *cenario {
 			LoginRateAttempts: opcoes.tentativasLogin,
 			LoginRateWindow:   5 * time.Minute,
 		},
-		Log:       log,
-		Auth:      servicoAuth,
-		Settings:  configuracoes,
-		Orthanc:   opcoes.orthanc,
-		Studies:   opcoes.studies,
-		Viewer:    opcoes.viewer,
-		Units:     opcoes.units,
-		Users:     usersService,
-		Auditoria: auditoria,
+		Log:         log,
+		Auth:        servicoAuth,
+		Settings:    configuracoes,
+		Orthanc:     opcoes.orthanc,
+		Studies:     opcoes.studies,
+		Viewer:      opcoes.viewer,
+		Units:       opcoes.units,
+		Users:       usersService,
+		Auditoria:   auditoria,
+		AuditReader: opcoes.auditReader,
 	})
 	if err != nil {
 		t.Fatalf("httpapi.New: %v", err)

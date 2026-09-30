@@ -52,25 +52,27 @@ type Deps struct {
 	Units    UnitsStore
 	Users    UsersService
 	// Auditoria registra eventos administrativos. Opcional.
-	Auditoria AuditRecorder
+	Auditoria   AuditRecorder
+	AuditReader AuditReader
 	// Now é opcional; o padrão é time.Now.
 	Now func() time.Time
 }
 
 // Server monta e serve a API.
 type Server struct {
-	cfg       config.Config
-	log       *slog.Logger
-	auth      *auth.Service
-	db        Pinger
-	settings  SettingsStore
-	orthanc   OrthancTester
-	studies   StudyFinder
-	viewer    ViewerClient
-	units     UnitsStore
-	users     UsersService
-	auditoria AuditRecorder
-	now       func() time.Time
+	cfg         config.Config
+	log         *slog.Logger
+	auth        *auth.Service
+	db          Pinger
+	settings    SettingsStore
+	orthanc     OrthancTester
+	studies     StudyFinder
+	viewer      ViewerClient
+	units       UnitsStore
+	users       UsersService
+	auditoria   AuditRecorder
+	auditReader AuditReader
+	now         func() time.Time
 
 	loginLimiter *rateLimiter
 	handler      http.Handler
@@ -94,18 +96,19 @@ func New(deps Deps) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:       deps.Config,
-		log:       deps.Log,
-		auth:      deps.Auth,
-		db:        deps.DB,
-		settings:  deps.Settings,
-		orthanc:   deps.Orthanc,
-		studies:   deps.Studies,
-		viewer:    deps.Viewer,
-		units:     deps.Units,
-		users:     deps.Users,
-		auditoria: deps.Auditoria,
-		now:       agora,
+		cfg:         deps.Config,
+		log:         deps.Log,
+		auth:        deps.Auth,
+		db:          deps.DB,
+		settings:    deps.Settings,
+		orthanc:     deps.Orthanc,
+		studies:     deps.Studies,
+		viewer:      deps.Viewer,
+		units:       deps.Units,
+		users:       deps.Users,
+		auditoria:   deps.Auditoria,
+		auditReader: deps.AuditReader,
+		now:         agora,
 		loginLimiter: newRateLimiter(
 			deps.Config.LoginRateAttempts,
 			deps.Config.LoginRateWindow,
@@ -155,6 +158,8 @@ func (s *Server) montarRotas() http.Handler {
 	} {
 		mux.Handle(route, encadear(handler, s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor)))
 	}
+
+	mux.Handle("GET /api/admin/audit", encadear(http.HandlerFunc(s.handleAudit), s.requireSession, s.requireRole(user.RoleAdmin)))
 
 	// Rota administrativa mínima, só para comprovar a autorização por perfil.
 	// Será substituída pelos endpoints reais de administração.

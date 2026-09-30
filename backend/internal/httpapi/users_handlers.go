@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pmfb-saude/pacs-web/backend/internal/audit"
 	"github.com/pmfb-saude/pacs-web/backend/internal/auth"
 	"github.com/pmfb-saude/pacs-web/backend/internal/user"
 	"github.com/pmfb-saude/pacs-web/backend/internal/useradmin"
@@ -207,9 +206,6 @@ func (s *Server) handleUserAction(kind string, role user.Role) http.HandlerFunc 
 			s.usersError(w, err)
 			return
 		}
-		for _, event := range result.Events {
-			s.auditUser(r, result.User.ID, audit.Event(event))
-		}
 		status := 200
 		if kind == "create" {
 			status = 201
@@ -236,19 +232,11 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		s.usersError(w, err)
 		return
 	}
-	s.auditUser(r, actor.ID, audit.EventUserPasswordChanged)
 	s.clearSessionCookie(w)
 	if csrf, e := novoTokenCSRF(); e == nil {
 		s.setCSRFCookie(w, csrf)
 	}
 	w.WriteHeader(204)
-}
-func (s *Server) auditUser(r *http.Request, target uuid.UUID, event audit.Event) {
-	if s.auditoria == nil {
-		return
-	}
-	actor, _ := UsuarioDoContexto(r.Context())
-	_ = s.auditoria.Record(r.Context(), audit.Entry{Event: event, ActorUserID: &actor.ID, ActorUsername: actor.Username, Detail: "target_user_id=" + target.String(), Origin: ipDoPedido(r)})
 }
 
 // Only the minimal authenticated flow may be used before changing the password.

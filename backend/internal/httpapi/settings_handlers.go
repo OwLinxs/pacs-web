@@ -146,12 +146,6 @@ func (s *Server) handlePutOrthancSettings(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	anterior, errAnterior := s.settings.Orthanc(r.Context())
-	if errAnterior != nil && !errors.Is(errAnterior, settings.ErrNaoConfigurado) {
-		writeInternalError(w, s.log, r, errAnterior)
-		return
-	}
-
 	salva, err := s.settings.SalvarOrthanc(r.Context(), config, credencial, usuario.ID)
 	switch {
 	case errors.Is(err, settings.ErrSemChaveMestra):
@@ -164,56 +158,5 @@ func (s *Server) handlePutOrthancSettings(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Auditoria sem valor algum de credencial: só o que mudou.
-	s.auditarAlteracaoOrthanc(r, usuario.ID, usuario.Username, anterior, salva, credencial, errors.Is(errAnterior, settings.ErrNaoConfigurado))
-
 	writeJSON(w, s.log, http.StatusOK, s.respostaOrthanc(salva, true))
-}
-
-func (s *Server) auditarAlteracaoOrthanc(r *http.Request, autorID uuid.UUID, autorUsername string, anterior, atual settings.Orthanc, credencial *string, primeiraVez bool) {
-	if s.auditoria == nil {
-		return
-	}
-
-	mudancas := make([]string, 0, 6)
-	if primeiraVez {
-		mudancas = append(mudancas, "configuração criada")
-	} else {
-		if anterior.Name != atual.Name {
-			mudancas = append(mudancas, "nome")
-		}
-		if anterior.BaseURL != atual.BaseURL {
-			mudancas = append(mudancas, "URL")
-		}
-		if anterior.Username != atual.Username {
-			mudancas = append(mudancas, "usuário")
-		}
-		if anterior.DICOMWebPath != atual.DICOMWebPath {
-			mudancas = append(mudancas, "endpoint DICOMweb")
-		}
-		if anterior.TimeoutSeconds != atual.TimeoutSeconds {
-			mudancas = append(mudancas, "timeout")
-		}
-		if anterior.VerifyTLS != atual.VerifyTLS {
-			mudancas = append(mudancas, "verificação TLS")
-		}
-	}
-	switch {
-	case credencial == nil:
-	case *credencial == "":
-		mudancas = append(mudancas, "credencial removida")
-	default:
-		mudancas = append(mudancas, "credencial alterada")
-	}
-	if len(mudancas) == 0 {
-		mudancas = append(mudancas, "sem alteração efetiva")
-	}
-
-	_ = s.auditoria.Record(r.Context(), audit.Entry{
-		Event:         audit.EventOrthancSettingsChanged,
-		ActorUserID:   &autorID,
-		ActorUsername: autorUsername,
-		Detail:        "PACS/Orthanc: " + strings.Join(mudancas, ", "),
-		Origin:        ipDoPedido(r),
-	})
 }

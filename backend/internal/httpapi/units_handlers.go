@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pmfb-saude/pacs-web/backend/internal/audit"
 	"github.com/pmfb-saude/pacs-web/backend/internal/units"
 	"github.com/pmfb-saude/pacs-web/backend/internal/user"
 )
@@ -116,7 +115,6 @@ func (s *Server) handleCreateUnit(w http.ResponseWriter, r *http.Request) {
 		s.unitError(w, err)
 		return
 	}
-	s.auditUnit(r, created.ID, audit.EventUnitCreated, "unidade criada")
 	writeJSON(w, s.log, http.StatusCreated, created)
 }
 
@@ -137,20 +135,10 @@ func (s *Server) handlePatchUnit(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	before, after, err := s.units.Update(ctx, id, patch)
+	_, after, err := s.units.Update(ctx, id, patch)
 	if err != nil {
 		s.unitError(w, err)
 		return
-	}
-	if before.Name != after.Name {
-		s.auditUnit(r, id, audit.EventUnitUpdated, "nome alterado")
-	}
-	if before.Active != after.Active {
-		event := audit.EventUnitDeactivated
-		if after.Active {
-			event = audit.EventUnitActivated
-		}
-		s.auditUnit(r, id, event, "estado ativo alterado")
 	}
 	writeJSON(w, s.log, 200, after)
 }
@@ -216,13 +204,4 @@ func (s *Server) unitError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, s.log, 503, CodeUnavailable, "Não foi possível acessar as unidades. Tente novamente.")
 	}
-}
-
-func (s *Server) auditUnit(r *http.Request, id uuid.UUID, event audit.Event, detail string) {
-	if s.auditoria == nil {
-		return
-	}
-	actor, _ := UsuarioDoContexto(r.Context())
-	// IDs administrativos e descrição fixa: nenhum nome enviado no formulário.
-	_ = s.auditoria.Record(r.Context(), audit.Entry{Event: event, ActorUserID: &actor.ID, ActorUsername: actor.Username, UnitID: &id, Detail: detail, Origin: ipDoPedido(r)})
 }

@@ -240,7 +240,19 @@ export type UsersPage = { items: ManagedUser[]; limit: number; offset: number; h
 export type UserInput = { name: string; username: string; email: string; unitIds: string[]; validity: Validity; initialPassword: string };
 function administrativeID(id: string) { if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)) throw new Error('Identificador inválido.'); return id; }
 
+export type AuditReference = {id:string; name:string; username:string; kind:'user'|'unit'};
+export type AuditEvent = {id:string; occurredAt:string; event:string; category:string; actor:AuditReference|null; target:AuditReference|null; result:string; detail:string; origin:string};
+export type AuditQuery = {dateFrom?:string; dateTo?:string; actorId?:string; targetUserId?:string; event?:string; category?:string; offset?:number};
+export type AuditPage = {items:AuditEvent[]; limit:number; offset:number; hasMore:boolean; nextOffset:number|null};
+
 export const api = {
+ async getAudit(query:AuditQuery,signal:AbortSignal):Promise<AuditPage> {
+  const params=new URLSearchParams({limit:'50'});
+  for(const key of ['dateFrom','dateTo','actorId','targetUserId','event','category','offset'] as const) {
+   const value=query[key];if(value!==undefined && value!=='')params.set(key,String(value));
+  }
+  return requisitar('GET',`/api/admin/audit?${params}`,{signal});
+ },
  async getUsers(query: UsersQuery, signal: AbortSignal): Promise<UsersPage> {
   const params = new URLSearchParams({limit:'25'});
   for (const [key,value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key,String(value));

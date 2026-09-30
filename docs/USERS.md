@@ -143,14 +143,15 @@ requisições subsequentes são rejeitadas pela resolução existente.
 
 Eventos: USER_CREATED, USER_UPDATED, USER_ACTIVATED, USER_DEACTIVATED,
 USER_ACCESS_RENEWED, USER_PASSWORD_RESET, USER_PASSWORD_CHANGED, USER_UNITS_CHANGED.
-Usam Recorder existente, ator/username administrativo, origem e Detail fixo com
+Usam audit.RecordTx na mesma transação, ator/username administrativo, origem e Detail fixo com
 `target_user_id`. Timestamp vem do banco. Nenhuma senha/hash/e-mail/nome do alvo,
 lista de vínculos ou dado clínico é registrada. Nome/e-mail/vínculos/ativo sem
 mudança não geram evento correspondente; renovar/resetar são ações explícitas.
 
-A política permanece **best-effort após o commit**, sem outbox ou atomicidade
-entre operação e evento. Falha da auditoria não desfaz alteração de usuário.
-Essa limitação de rastreabilidade precisa ser considerada antes da produção.
+Atualização Auditoria V1: alterações administrativas, troca de senha, revogação
+de sessões e eventos correspondentes são atômicos. Falha de auditoria obrigatória
+faz rollback. Login/logout continuam com política separada. A política anterior
+best-effort administrativa foi substituída; detalhes em [AUDIT.md](AUDIT.md).
 
 ## Frontend e privacidade
 

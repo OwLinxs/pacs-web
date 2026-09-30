@@ -118,9 +118,9 @@ texto operacional fixo, sem valores do formulário. Uma requisição que muda no
 e status produz os dois eventos correspondentes; PATCH sem mudança não gera
 novo evento. Recusas/erros não geram evento de sucesso.
 
-Preservada a política existente de auditoria best-effort, após gravar a operação:
-falha de gravação da auditoria não desfaz a alteração da unidade. Não se introduz
-outbox ou mudança ampla na política de auditoria nesta etapa.
+Atualização Auditoria V1: o store grava alteração e eventos na mesma transação.
+Falha de auditoria obrigatória reverte a operação. A política best-effort era
+o comportamento da Etapa 1; foi substituída conforme [AUDIT.md](AUDIT.md).
 
 ## Interface
 

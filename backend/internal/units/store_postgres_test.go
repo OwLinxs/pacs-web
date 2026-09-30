@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pmfb-saude/pacs-web/backend/internal/audit"
 	"github.com/pmfb-saude/pacs-web/backend/internal/database"
 	"github.com/pmfb-saude/pacs-web/backend/internal/units"
 )
@@ -71,7 +72,7 @@ func TestStoreAndMigrationPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 3 {
+	if len(migrations) != 4 {
 		t.Fatal("atualize fixture para as migrations atuais")
 	}
 	if _, err := pool.Exec(ctx, migrations[0].SQL); err != nil {
@@ -123,6 +124,7 @@ func TestStoreAndMigrationPostgres(t *testing.T) {
 	if err != nil || linked != id || slug != "legacy-one" || kind != "UBS" || hash != "hash-ficticio-nao-utilizavel" {
 		t.Fatal("migration alterou unidade/usuário legado")
 	}
+	ctx = audit.WithActor(ctx, audit.Actor{ID: userID, Username: "synthetic-user"})
 	store := units.NewStore(pool)
 	made, err := store.Create(ctx, "  Unidade Nova  ")
 	if err != nil || made.Name != "Unidade Nova" || !made.Active {

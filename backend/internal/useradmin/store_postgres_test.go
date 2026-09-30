@@ -71,7 +71,7 @@ func disposable(t *testing.T) (context.Context, *pgxpool.Pool) {
 func TestPostgresMigrationAndUsers(t *testing.T) {
 	ctx, pool := disposable(t)
 	migrations, err := database.LoadMigrations()
-	if err != nil || len(migrations) != 3 {
+	if err != nil || len(migrations) != 4 {
 		t.Fatal("migrations")
 	}
 	for _, m := range migrations[:2] {

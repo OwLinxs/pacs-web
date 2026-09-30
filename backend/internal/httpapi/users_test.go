@@ -221,7 +221,7 @@ func TestUsersPasswordLifecycleAndAudit(t *testing.T) {
 	}
 	expectStatus(t, c.login(t, created.Username, senhaTeste), 200)
 	oldToken := c.cookieSessao()
-	for _, path := range []string{"/api/studies", "/api/units", "/api/admin/users", "/api/admin/settings/orthanc", "/api/studies/invalid/series"} {
+	for _, path := range []string{"/api/studies", "/api/units", "/api/admin/audit", "/api/admin/users", "/api/admin/settings/orthanc", "/api/studies/invalid/series"} {
 		result := expectStatus(t, c.requisitar(t, "GET", path, nil), 403)
 		if !strings.Contains(result, "PASSWORD_CHANGE_REQUIRED") {
 			t.Fatal("missing mandatory gate")
@@ -255,9 +255,7 @@ func TestUsersPasswordLifecycleAndAudit(t *testing.T) {
 	expectStatus(t, c.login(t, created.Username, "reset-synthetic-password"), 403)
 	for _, entry := range c.auditoria.Entradas() {
 		if strings.HasPrefix(string(entry.Event), "USER_") {
-			if entry.ActorUserID == nil || entry.Detail != "target_user_id="+created.ID.String() {
-				t.Fatal("audit context")
-			}
+			t.Fatal("handler must not duplicate store-side transactional audit")
 		}
 	}
 	for _, secret := range []string{senhaTeste, "new-synthetic-password", "reset-synthetic-password", "$argon2id$"} {

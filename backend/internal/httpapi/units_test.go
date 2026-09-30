@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pmfb-saude/pacs-web/backend/internal/audit"
 	"github.com/pmfb-saude/pacs-web/backend/internal/units"
 	"github.com/pmfb-saude/pacs-web/backend/internal/user"
 )
@@ -89,11 +88,10 @@ func unitResponse(t *testing.T, r *http.Response, status int) units.Unit {
 	}
 	return u
 }
-func TestUnitsAdminLifecycleAndAudit(t *testing.T) {
+func TestUnitsAdminLifecycle(t *testing.T) {
 	f := newUnitsFake()
 	c := montarCenario(t, opcoesCenario{units: f})
 	loginStudies(t, c, user.RoleAdmin)
-	before := len(c.auditoria.Entradas())
 	created := unitResponse(t, c.requisitar(t, "POST", "/api/admin/units", map[string]any{"name": "  Unidade Sintética  "}), 201)
 	if created.Name != "Unidade Sintética" || !created.Active || created.ID == uuid.Nil {
 		t.Fatal("criação inválida")
@@ -125,16 +123,8 @@ func TestUnitsAdminLifecycleAndAudit(t *testing.T) {
 		t.Fatal("reativação falhou")
 	}
 	_ = unitResponse(t, c.requisitar(t, "PATCH", path, map[string]any{"active": true}), 200)
-	events := c.auditoria.Entradas()[before:]
-	want := []audit.Event{audit.EventUnitCreated, audit.EventUnitUpdated, audit.EventUnitDeactivated, audit.EventUnitActivated}
-	if len(events) != len(want) {
-		t.Fatalf("eventos=%d", len(events))
-	}
-	for i, event := range events {
-		if event.Event != want[i] || event.ActorUserID == nil || event.ActorUsername != "consulta.teste" || event.UnitID == nil || *event.UnitID != created.ID || strings.Contains(event.Detail, "Renomeada") {
-			t.Fatal("auditoria incorreta")
-		}
-	}
+	// Persistence/audit atomicity belongs to the store; this double tests HTTP behavior.
+
 	if r := c.requisitar(t, "DELETE", path, nil); r.StatusCode < 400 {
 		t.Fatal("exclusão física exposta")
 	}

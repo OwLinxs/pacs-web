@@ -155,7 +155,7 @@ export function App() {
             onToast={setToast}
           />
         )}
-        {telaDoShell === 'auditoria' && <AuditoriaScreen />}
+        {telaDoShell === 'auditoria' && sessao.user?.role === 'ADMIN' && <AuditoriaScreen onSessionExpired={expirarSessao} />}
         {telaDoShell === 'configuracoes' && <ConfiguracoesScreen onToast={setToast} />}
       </AppShell>
     );

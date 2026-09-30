@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/pmfb-saude/pacs-web/backend/internal/audit"
 	"github.com/pmfb-saude/pacs-web/backend/internal/secrets"
 )
 
@@ -126,8 +127,22 @@ func (s *Store) SalvarOrthanc(ctx context.Context, config Orthanc, credencial *s
 	if autor != uuid.Nil {
 		autorOuNil = &autor
 	}
-	if _, err := s.pool.Exec(ctx, gravar, ChaveOrthanc, bruto, autorOuNil); err != nil {
-		return Orthanc{}, fmt.Errorf("gravar configuração: %w", err)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Orthanc{}, audit.ErrUnavailable
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, gravar, ChaveOrthanc, bruto, autorOuNil); err != nil {
+		return Orthanc{}, audit.ErrUnavailable
+	}
+	entry := audit.FromContext(ctx, audit.EventOrthancSettingsChanged)
+	entry.ActorUserID = autorOuNil
+	entry.Detail = "PACS/Orthanc: configuração atualizada"
+	if audit.RecordTx(ctx, tx, entry) != nil {
+		return Orthanc{}, audit.ErrUnavailable
+	}
+	if tx.Commit(ctx) != nil {
+		return Orthanc{}, audit.ErrUnavailable
 	}
 
 	config.HasCredential = novo.CredentialSealed != ""

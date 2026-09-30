@@ -12,7 +12,7 @@ const NAV_PRINCIPAL: NavItem[] = [{ key: 'exames', icon: 'file', label: 'Exames'
 const NAV_ADMIN: NavItem[] = [
   { key: 'unidades', icon: 'layers', label: 'Unidades', apenasAdmin: true },
   { key: 'usuarios', icon: 'users', label: 'Usuários' },
-  { key: 'auditoria', icon: 'shield', label: 'Auditoria' },
+  { key: 'auditoria', icon: 'shield', label: 'Auditoria', apenasAdmin: true },
   { key: 'configuracoes', icon: 'settings', label: 'Configurações', apenasAdmin: true },
 ];
 

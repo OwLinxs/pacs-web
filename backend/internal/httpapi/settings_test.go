@@ -295,32 +295,18 @@ func TestPutOrthancSettingsSemChaveMestra(t *testing.T) {
 	}
 }
 
-func TestAlteracaoDeConfiguracaoEAuditada(t *testing.T) {
+// Atomic settings audit is verified with a disposable PostgreSQL transaction.
+func TestConfiguracaoNaoDuplicaAuditoriaNoHandler(t *testing.T) {
 	c := cenarioAdmin(t)
-
-	resposta := c.requisitar(t, http.MethodPut, "/api/admin/settings/orthanc", map[string]any{
-		"name": "Orthanc Principal", "baseUrl": "http://orthanc.interno.invalid",
-		"timeoutSeconds": 10, "verifyTls": true, "credential": "credencial-de-teste",
-	})
-	if resposta.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resposta.StatusCode)
+	response := c.requisitar(t, http.MethodPut, "/api/admin/settings/orthanc", map[string]any{"name": "PACS Sintético", "baseUrl": "http://fixture.invalid", "timeoutSeconds": 10, "verifyTls": true})
+	if response.StatusCode != 200 {
+		t.Fatal("settings failed")
 	}
-
-	var encontrado *audit.Entry
-	for _, entrada := range c.auditoria.Entradas() {
-		if entrada.Event == audit.EventOrthancSettingsChanged {
-			copia := entrada
-			encontrado = &copia
+	response.Body.Close()
+	for _, e := range c.auditoria.Entradas() {
+		if e.Event == audit.EventOrthancSettingsChanged {
+			t.Fatal("handler must not duplicate transactional audit")
 		}
-	}
-	if encontrado == nil {
-		t.Fatalf("evento ORTHANC_SETTINGS_CHANGED não foi registrado; eventos: %v", c.auditoria.Eventos())
-	}
-	if strings.Contains(encontrado.Detail, "credencial-de-teste") {
-		t.Error("a auditoria não pode conter o valor da credencial")
-	}
-	if !strings.Contains(encontrado.Detail, "credencial alterada") {
-		t.Errorf("detalhe = %q, deveria indicar a alteração da credencial", encontrado.Detail)
 	}
 }
 

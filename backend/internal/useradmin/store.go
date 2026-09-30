@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pmfb-saude/pacs-web/backend/internal/audit"
 	"github.com/pmfb-saude/pacs-web/backend/internal/auth"
 	"github.com/pmfb-saude/pacs-web/backend/internal/user"
 )
@@ -177,6 +178,11 @@ func (s *Store) Apply(ctx context.Context, actor user.User, c Command, now time.
 	if err != nil {
 		return Result{}, err
 	}
+	for _, event := range events {
+		if record(ctx, tx, actor, id, audit.Event(event)) != nil {
+			return Result{}, ErrUnavailable
+		}
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return Result{}, ErrUnavailable
 	}
@@ -262,6 +268,9 @@ func (s *Store) ChangePassword(ctx context.Context, u user.User, tokenHash []byt
 	if err = revoke(ctx, tx, u.ID, now); err != nil {
 		return err
 	}
+	if record(ctx, tx, u, u.ID, audit.EventUserPasswordChanged) != nil {
+		return ErrUnavailable
+	}
 	return storeError(tx.Commit(ctx))
 }
 
@@ -269,4 +278,12 @@ func (s *Store) TargetRole(ctx context.Context, id uuid.UUID) (user.Role, error)
 	var role user.Role
 	err := s.pool.QueryRow(ctx, `SELECT role FROM users WHERE id=$1`, id).Scan(&role)
 	return role, storeError(err)
+}
+
+func record(ctx context.Context, tx pgx.Tx, actor user.User, target uuid.UUID, event audit.Event) error {
+	e := audit.FromContext(ctx, event)
+	e.ActorUserID = &actor.ID
+	e.ActorUsername = actor.Username
+	e.Detail = "target_user_id=" + target.String()
+	return audit.RecordTx(ctx, tx, e)
 }

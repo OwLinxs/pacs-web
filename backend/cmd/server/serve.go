@@ -70,17 +70,18 @@ func executarServe(ctx context.Context, log *slog.Logger) error {
 
 	orthancClient := orthanc.NewClient()
 	api, err := httpapi.New(httpapi.Deps{
-		Config:    cfg,
-		Log:       log,
-		Auth:      servicoAuth,
-		DB:        pool,
-		Settings:  configuracoes,
-		Orthanc:   orthancClient,
-		Studies:   orthancClient,
-		Viewer:    orthancClient,
-		Units:     units.NewStore(pool),
-		Users:     useradmin.New(useradmin.NewStore(pool), auth.NewDefaultHasher()),
-		Auditoria: auditoria,
+		Config:      cfg,
+		Log:         log,
+		Auth:        servicoAuth,
+		DB:          pool,
+		Settings:    configuracoes,
+		Orthanc:     orthancClient,
+		Studies:     orthancClient,
+		Viewer:      orthancClient,
+		Units:       units.NewStore(pool),
+		Users:       useradmin.New(useradmin.NewStore(pool), auth.NewDefaultHasher()),
+		Auditoria:   auditoria,
+		AuditReader: auditoria,
 	})
 	if err != nil {
 		return err

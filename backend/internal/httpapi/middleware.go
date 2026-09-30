@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pmfb-saude/pacs-web/backend/internal/audit"
 	"github.com/pmfb-saude/pacs-web/backend/internal/auth"
 	"github.com/pmfb-saude/pacs-web/backend/internal/user"
 )
@@ -231,6 +232,7 @@ func (s *Server) requireSession(proximo http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), chaveUsuario, usuario)
+		ctx = audit.WithActor(ctx, audit.Actor{ID: usuario.ID, Username: usuario.Username, Origin: ipDoPedido(r)})
 		ctx = context.WithValue(ctx, chaveSessao, sessao)
 		ctx = context.WithValue(ctx, chaveTokenSessao, token)
 		proximo.ServeHTTP(w, r.WithContext(ctx))
