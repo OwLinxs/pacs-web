@@ -41,7 +41,7 @@ services:
       ALLOWED_ORIGINS: ""
     ports:
       # Só no loopback do host: quem publica para a rede é o proxy existente.
-      - "127.0.0.1:${APP_PORT:-8080}:8080"
+      - "192.168.0.173:${APP_PORT:-8080}:8080"
     networks:
       - pacsweb
       - pacs-prod
