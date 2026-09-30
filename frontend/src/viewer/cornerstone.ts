@@ -3,7 +3,22 @@ import { init as initLoader, wadouri } from '@cornerstonejs/dicom-image-loader';
 import { utilities as metadata } from '@cornerstonejs/metadata';
 import { createAnnotationSession, createViewerTools, initializeViewerTools, type ViewerTool } from './tools';
 
+import type { ExportSnapshot, ExportMetadata } from './exportModel';
 import { fitToWindow, readPresentation, type PresentationState } from './presentation';
+
+type NaturalizedImage = Partial<Record<'PatientName'|'PatientID'|'StudyDate'|'Modality'|'StudyDescription'|'InstitutionName'|'SeriesNumber'|'InstanceNumber'|'BurnedInAnnotation', unknown>>;
+function naturalValue(value:unknown):string {
+ if(Array.isArray(value)) return naturalValue(value[0]);
+ if(value && typeof value==='object') {
+  const person=value as {Alphabetic?:unknown;Ideographic?:unknown;Phonetic?:unknown;Value?:unknown};
+  return naturalValue(person.Alphabetic ?? person.Ideographic ?? person.Phonetic ?? person.Value);
+ }
+ return (typeof value==='string'||typeof value==='number'?String(value):'').replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,512);
+}
+function exportTags(natural: NaturalizedImage | undefined): Omit<ExportMetadata,'index'|'total'> {
+ const value=(tag:keyof NaturalizedImage)=>naturalValue(natural?.[tag]);
+ return {patientName:value('PatientName'),patientId:value('PatientID'),studyDate:value('StudyDate'),modality:value('Modality'),studyDescription:value('StudyDescription'),institution:value('InstitutionName'),seriesNumber:value('SeriesNumber'),instanceNumber:value('InstanceNumber'),burnedIn:value('BurnedInAnnotation')};
+}
 
 export const VIEWER_SESSION_EXPIRED = 'pacs-viewer-session-expired';
 let initialized = false;
@@ -41,6 +56,7 @@ export type StackCallbacks = {
   presentation: (value: PresentationState) => void;
 };
 export type StackController = {
+  capture: () => ExportSnapshot;
   setStack: (paths: string[], signal: AbortSignal) => Promise<void>;
   step: (delta: number, loop?: boolean) => Promise<void>;
   selectTool: (tool: ViewerTool) => boolean;
@@ -217,6 +233,17 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
   }, { once: true });
 
   return {
+    capture() {
+      if (!active || !presented || busy || lifetime.aborted || currentSignal?.aborted || tools.interacting()) throw new Error('Aguarde o carregamento da imagem.');
+      const imageId=viewport.getCurrentImageId();
+      if(!imageId || viewport.getCornerstoneImage()?.imageId!==imageId)throw new Error('Imagem indisponível.');
+      const source=viewport.getCanvas();
+      if(!source?.width || !source.height || source.width*source.height>32*1024*1024)throw new Error('Canvas indisponível.');
+      const canvas=document.createElement('canvas');canvas.width=source.width;canvas.height=source.height;
+      const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Canvas indisponível.');
+      ctx.drawImage(source,0,0);
+      return {canvas,metadata:{...exportTags((cache.getImage(imageId) as {data?: NaturalizedImage} | undefined)?.data ?? (viewport.getCornerstoneImage() as {data?: NaturalizedImage} | undefined)?.data),index:viewport.getCurrentImageIdIndex(),total:imageIds.length},dispose(){canvas.width=0;canvas.height=0;}};
+    },
     setStack(paths, signal) {
       presented = false;
       tools.suspend(true);

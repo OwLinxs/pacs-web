@@ -246,6 +246,9 @@ export type AuditQuery = {dateFrom?:string; dateTo?:string; actorId?:string; tar
 export type AuditPage = {items:AuditEvent[]; limit:number; offset:number; hasMore:boolean; nextOffset:number|null};
 
 export const api = {
+ async recordViewerExport(format:'PNG'|'JPEG'|'PDF',identified:boolean,signal:AbortSignal):Promise<void> {
+  return requisitar('POST','/api/viewer/exports',{body:{format,identified},signal});
+ },
  async getAudit(query:AuditQuery,signal:AbortSignal):Promise<AuditPage> {
   const params=new URLSearchParams({limit:'50'});
   for(const key of ['dateFrom','dateTo','actorId','targetUserId','event','category','offset'] as const) {

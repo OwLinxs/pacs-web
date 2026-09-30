@@ -2,15 +2,15 @@
 
 Documento principal de continuidade do **novo PACS Web da Prefeitura Municipal
 de Francisco Beltrão**. Consolida código/documentação do repositório e o estado
-operacional informado pelo responsável. As validações reais e migrations 0001–0003
-são informações do responsável. A atualização Auditoria V1 descreve código/testes
-locais, ainda sem deploy ou validação real; 0004 permanece pendente no ambiente.
+operacional informado pelo responsável. As validações reais e migrations 0001–0004
+são informações do responsável. Viewer V5 é implementação local sem deploy.
 
 ## Estado funcional confirmado
 
 | Entrega | Estado atual |
 | --- | --- |
-| Auditoria V1 | **IMPLEMENTADA**, sem deploy ou validação real; migration 0004 apenas em banco descartável |
+| Auditoria V1 | **VALIDADA EM AMBIENTE REAL**, conforme confirmação posterior do responsável; migration 0004 aplicada |
+| Viewer V5 — exportação | **IMPLEMENTADO LOCALMENTE**, sem validação real ou deploy |
 | Worklist V2 | **VALIDADA EM AMBIENTE REAL**, com integração Orthanc e ExtendedFind disponível no Orthanc utilizado |
 | Viewer V4 | **VALIDADO COM DICOM REAL**; Invert OFF inicial e após Reset |
 | Administração V1 — Etapa 1: Unidades | **VALIDADA EM AMBIENTE REAL**; migration 0002 aplicada |
@@ -99,7 +99,7 @@ DICOM 4242. Não executar comandos de infraestrutura durante revisão documental
 
 **Auditoria V1 substitui a tela mockada por consulta real somente ADMIN**.
 GESTOR/MEDICO não veem o menu e recebem 403 na API; gate de senha mantido.
-Estado local: implementada/testada, ainda sem deploy/validação real. [AUDIT.md](AUDIT.md).
+Estado: validada em ambiente real conforme confirmação posterior do responsável. [AUDIT.md](AUDIT.md).
 
 ## Orthanc e Worklist V2 — VALIDADA EM AMBIENTE REAL
 
@@ -145,6 +145,8 @@ Expand, Since/Limit com sentinela; não carrega todo o acervo.
 V0 pipeline real; V1 séries/stack; V2 ferramentas; V3 múltiplos viewports;
 **V4 validado com DICOM real pelo responsável**, conforme histórico documentado.
 Essa validação externa não autoriza testes contra PACS real em desenvolvimento.
+Viewer V5 adiciona exportação da imagem atual como PNG/JPEG/PDF, implementada localmente;
+consulta [VIEWER_EXPORT.md](VIEWER_EXPORT.md). Invert OFF inicial/Reset permanece.
 
 Gateway autenticado, autorizado para os três perfis, valida parentesco:
 
@@ -184,18 +186,17 @@ Cleanup de timers, listeners, observers, grupos/engine e requests deve ser manti
 Runner em `internal/database/migrate.go`, SQL embutido, checksum SHA-256,
 `schema_migrations`, uma transação por migration, somente avanço. **Serve aplica
 migrations pendentes na inicialização**; não iniciar backend contra banco existente
-para simples inspeção. **0001, 0002 e 0003 já estão aplicadas no ambiente atual**,
+para simples inspeção. **0001, 0002, 0003 e 0004 já estão aplicadas no ambiente atual**,
 conforme confirmação do responsável; 0002/0003 também foram validadas funcionalmente.
 São imutáveis: não editar esses arquivos nem seus checksums. Qualquer alteração
-futura de schema deve utilizar nova migration. Auditoria V1 acrescenta 0004,
-aplicada somente em bancos descartáveis de teste nesta entrega.
+futura de schema deve utilizar nova migration. Auditoria V1 acrescentou 0004, também aplicada e validada posteriormente no ambiente real conforme o responsável.
 
 | Migration | Objetivo |
 | --- | --- |
 | `0001_init.sql` | Cria units, users, sessions, audit_events e app_settings, constraints e índices |
 | `0002_units_management.sql` | Valida nomes legados e acrescenta CHECK/índice case-insensitive a units, sem alterar usuários/vínculos |
 | `0003_users_management.sql` | Cria user_units, migra vínculos não-ADMIN, acrescenta must_change_password default false e restringe username sem renomear legado |
-| `0004_audit_query.sql` | Índice parcial de alvo de usuário em audit_events; **pendente no ambiente real** |
+| `0004_audit_query.sql` | Índice parcial de alvo de usuário em audit_events; **aplicada no ambiente real conforme o responsável** |
 
 `users` atual: UUID id; name; username único; email opcional; password_hash;
 role; **unit_id opcional legado** (FK units, ON DELETE SET NULL); active;
@@ -288,6 +289,7 @@ Eventos confirmados em `internal/audit/audit.go`:
   USER_ACCESS_RENEWED, USER_PASSWORD_RESET, USER_PASSWORD_CHANGED, USER_UNITS_CHANGED.
 - Autenticação: LOGIN_SUCCESS, LOGIN_FAILURE, LOGOUT.
 - Configuração/conexão: ORTHANC_SETTINGS_CHANGED, ORTHANC_CONNECTION_TESTED.
+- Exportação V5 local: VIEWER_IMAGE_EXPORTED, apenas formato e modo identificado.
 
 `audit_events` registra horário, evento, ator, origem, unidade quando aplicável
 e detalhe operacional. Usuários usam ID do alvo no detalhe; unidades usam unit_id.
@@ -310,8 +312,7 @@ Essa limitação restante está documentada em [AUDIT.md](AUDIT.md).
 
 0004_audit_query.sql acrescenta índice parcial para detail canônico de alvo,
 aproveitando índices de data/ator/evento existentes. Sem novas colunas e sem
-editar 0001–0003. **0004 não foi aplicada no ambiente real**; sua criação de índice
-pode bloquear escritas temporariamente e exige avaliação antes de deploy futuro.
+editar 0001–0003. **0004 foi aplicada no ambiente real**, conforme confirmação posterior do responsável.
 Retenção/exclusão automática continuam fora de escopo; antiga primitiva Purge
 não utilizada foi removida. Não há garantia contra adulteração por acesso SQL direto.
 
@@ -360,8 +361,8 @@ sintéticas; nenhum banco existente ou Orthanc real acessado. Detalhes: [AUDIT.m
 
 Manter visíveis para pré-produção:
 
-- **Auditoria:** atomicidade administrativa implementada na V1, ainda exige
-  validação real. Login/logout/teste PACS seguem best-effort; revisar confiabilidade
+- **Auditoria:** atomicidade administrativa da V1 validada no ambiente real conforme
+  responsável; a extensão de exportação V5 ainda exige validação controlada. Login/logout/teste PACS seguem best-effort; revisar confiabilidade
   desses fluxos, origem do logout, retenção e privilégios SQL antes de produção.
 - **PostgreSQL:** revisar usuário da aplicação e privilégio mínimo, separando
   necessidades de operação e migrations; não inferir permissões reais do Compose.
@@ -428,8 +429,7 @@ ADMINISTRATION/USERS/BACKEND foram atualizados apenas quanto à nova auditoria.
 
 ## Próximas etapas planejadas — sem execução automática
 
-1. Revisão e posterior validação autorizada da **Auditoria V1 implementada**, sem
-   confundir testes locais com validação real. Contrato/decisões: [AUDIT.md](AUDIT.md).
+1. Revisão controlada do **Viewer V5 implementado localmente**: [VIEWER_EXPORT.md](VIEWER_EXPORT.md).
 2. **HARDENING / PRÉ-PRODUÇÃO:** revisar e tratar dívidas restantes.
 3. Publicação HTTPS controlada; depois piloto controlado.
 4. Somente após essas etapas avaliar substituição definitiva do sistema atual.

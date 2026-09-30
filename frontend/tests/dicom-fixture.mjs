@@ -1,5 +1,5 @@
 // DICOM Part 10 sintético: quadrado 32x32, sem qualquer paciente real.
-export function syntheticDICOM({ calibrated = true, width = 32, height = 32, monochrome1 = false } = {}) {
+export function syntheticDICOM({ calibrated = true, width = 32, height = 32, monochrome1 = false, exportMetadata = false } = {}) {
   const element = (group, tag, vr, value) => {
     let data = Buffer.isBuffer(value) ? value : Buffer.from(value, 'ascii');
     if (data.length % 2) data = Buffer.concat([data, Buffer.from([vr === 'UI' ? 0 : 32])]);
@@ -22,7 +22,10 @@ export function syntheticDICOM({ calibrated = true, width = 32, height = 32, mon
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.writeUInt16LE((x * 80 + y * 20) % 4096, 2 * (width * y + x));
   return Buffer.concat([
     Buffer.alloc(128), Buffer.from('DICM'), element(2, 0, 'UL', size), meta,
-    element(8, 0x16, 'UI', sop), element(8, 0x18, 'UI', uid), element(8, 0x60, 'CS', 'OT'),
+    element(8, 0x16, 'UI', sop), element(8, 0x18, 'UI', uid),
+    ...(exportMetadata ? [element(8,0x20,'DA','20260929')] : []),
+    element(8, 0x60, 'CS', 'OT'),
+    ...(exportMetadata ? [element(8,0x80,'LO','INSTITUICAO TESTE'),element(8,0x1030,'LO','PADRAO SINTETICO')] : []),
     element(0x10, 0x10, 'PN', 'FICTICIO^VIEWER'), element(0x10, 0x20, 'LO', 'SYNTH-VIEWER'),
     element(0x20, 0x0d, 'UI', '2.25.111111111'), element(0x20, 0x0e, 'UI', '2.25.222222222'),
     element(0x20, 0x52, 'UI', '2.25.333333333'),
@@ -32,6 +35,7 @@ export function syntheticDICOM({ calibrated = true, width = 32, height = 32, mon
     element(0x28, 0x10, 'US', us(height)), element(0x28, 0x11, 'US', us(width)),
     ...(calibrated ? [element(0x28, 0x30, 'DS', '1\\1')] : []), element(0x28, 0x100, 'US', us(16)),
     element(0x28, 0x101, 'US', us(12)), element(0x28, 0x102, 'US', us(11)), element(0x28, 0x103, 'US', us(0)),
+    ...(exportMetadata ? [element(0x28,0x301,'CS','NO')] : []),
     element(0x28, 0x1050, 'DS', '2048'), element(0x28, 0x1051, 'DS', '4096'),
     element(0x7fe0, 0x10, 'OW', pixels),
   ]);

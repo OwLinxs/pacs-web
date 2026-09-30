@@ -75,7 +75,7 @@ func ParseQuery(raw string) (Query, error) {
 			}
 		case "category":
 			switch v {
-			case "users", "units", "auth", "settings":
+			case "users", "units", "auth", "settings", "viewer":
 				q.Category = v
 			default:
 				return q, ErrInvalid

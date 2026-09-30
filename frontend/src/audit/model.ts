@@ -1,4 +1,5 @@
 export const eventLabels = {
+ VIEWER_IMAGE_EXPORTED:'Imagem exportada',
  USER_CREATED:'Usuário criado', USER_UPDATED:'Usuário atualizado', USER_ACTIVATED:'Usuário ativado', USER_DEACTIVATED:'Usuário desativado',
  USER_ACCESS_RENEWED:'Acesso renovado', USER_PASSWORD_RESET:'Senha redefinida', USER_PASSWORD_CHANGED:'Senha alterada', USER_UNITS_CHANGED:'Unidades do usuário alteradas',
  UNIT_CREATED:'Unidade criada', UNIT_UPDATED:'Unidade atualizada', UNIT_ACTIVATED:'Unidade ativada', UNIT_DEACTIVATED:'Unidade desativada',
@@ -12,6 +13,8 @@ export function auditDate(value:string) {
 export function resultLabel(value:string) { return ({success:'Sucesso',failure:'Falha',unknown:'Não informado'} as Record<string,string>)[value] ?? 'Não informado'; }
 // Display only known operational details. No JSON dump or arbitrary metadata rendering.
 export function detailLabel(value:string) {
+ const exported=/^format=(PNG|JPEG|PDF);identified=(true|false)$/.exec(value);
+ if(exported)return `${exported[1]} · ${exported[2]==='true'?'Com identificação':'Sem identificação'}`;
  const labels:Record<string,string>={
   'unidade criada':'Unidade cadastrada.', 'nome alterado':'Nome da unidade atualizado.', 'estado ativo alterado':'Situação da unidade alterada.',
   'sessão iniciada':'Sessão iniciada.', 'encerrada pelo usuário':'Sessão encerrada pelo usuário.',

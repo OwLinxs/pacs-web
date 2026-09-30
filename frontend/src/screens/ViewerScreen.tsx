@@ -7,6 +7,7 @@ import type { ViewerSession } from '../viewer/cornerstone';
 import { ViewportPane, type PaneControls, type PaneState } from '../viewer/ViewportPane';
 import { SeriesThumbnail } from '../viewer/SeriesThumbnail';
 import { fillLayout, type LayoutCount, type SeriesSlot } from '../viewer/layout';
+import { ExportDialog } from '../viewer/ExportDialog';
 import { ViewerToolbar } from '../viewer/ViewerToolbar';
 
 const DARK = 'color-mix(in srgb, var(--color-neutral-900) 40%, black)';
@@ -37,6 +38,7 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
   const [maximized, setMaximized] = useState<number | null>(null);
   const maximizedRef = useRef(maximized); maximizedRef.current = maximized;
   const [states, setStates] = useState<Record<number, PaneState>>({});
+  const [exportOpen,setExportOpen]=useState(false);
   const [fps, setFps] = useState(10);
   const controls = useRef<(PaneControls | null)[]>([]);
   const [runtime, setRuntime] = useState<{ session: Promise<ViewerSession>; signal: AbortSignal; load: (id: string) => Promise<string[]>; expired: () => void } | null>(null);
@@ -75,7 +77,7 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
       if (error instanceof ApiError && error.status === 401) expired(); else setListState('error');
     });
     const key = (event: KeyboardEvent) => {
-      if (lifetime.signal.aborted) return;
+      if (lifetime.signal.aborted || document.querySelector('dialog[open]')) return;
       const delta = navigationDelta(event);
       if (delta) { event.preventDefault(); controls.current[activeRef.current]?.step(delta); return; }
       const target = event.target;
@@ -131,11 +133,12 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
           setAssigned((before) => fillLayout(before, series, count, layout));
           setLayout(count);
         }}>{count === 1 ? '1x1' : count === 2 ? '1x2' : '2x2'}</button>)}
-        <span>Viewport {active + 1}</span>
+        <span>Viewport {active + 1}</span><button type="button" style={ACTION} disabled={!state?.ready} onClick={()=>setExportOpen(true)}>Exportar</button>
         <button type="button" style={ACTION} disabled={!state?.playing && (!state?.ready || state.total < 2)} onClick={() => state?.playing ? controls.current[active]?.pause() : controls.current[active]?.play(fps)}>{state?.playing ? 'Pause' : 'Play'}</button>
         <label>FPS <input aria-label="FPS" type="number" min={1} max={30} value={fps} onChange={(event) => { controls.current[active]?.pause(); setFps(Math.min(30, Math.max(1, Number(event.target.value) || 10))); }} style={{ ...ACTION, width: 42, padding: 4 }} /></label>
         <button type="button" style={ACTION} disabled={!state?.ready} onClick={() => controls.current[active]?.clear()}>Limpar medições</button>
       </div>
+      {exportOpen && runtime && <ExportDialog viewport={active} signal={runtime.signal} expired={runtime.expired} close={()=>setExportOpen(false)} capture={()=>{const pane=controls.current[active];if(!pane)throw new Error('Imagem indisponível.');return pane.capture();}}/>}
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <aside style={{ width: 160, flex: 'none', overflowY: 'auto', padding: 16, borderRight: `1px solid ${LINE}`, background: PANEL }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 20 }}><span>Séries</span><span>{series.length}</span></div>

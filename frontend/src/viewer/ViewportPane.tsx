@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, type ViewerSeries } from '../api/client';
+import type { ExportSnapshot } from './exportModel';
 import type { StackController, ViewerSession } from './cornerstone';
 import { createCine } from './cine';
 import { Icon } from '../design-system/Icon';
@@ -8,6 +9,7 @@ import type { ViewerTool } from './tools';
 
 export type PaneState = PresentationState & { ready: boolean; tool: ViewerTool; playing: boolean; total: number };
 export type PaneControls = {
+  capture:()=>ExportSnapshot;
   selectTool: (tool: ViewerTool) => void; invert: () => void; reset: () => void;
   step: (delta: number) => void; play: (fps: number) => void; pause: () => void;
   rotate: (delta: number) => void; flip: (axis: 'horizontal' | 'vertical') => void; fit: () => void;
@@ -59,6 +61,7 @@ export function ViewportPane({ id, active, series, session, signal, load, activa
     });
     void factory.current.catch(() => { if (!lifetime.signal.aborted) setState('error'); });
     register({
+      capture:()=>{if(!driver.current)throw new Error("Imagem indisponível.");return driver.current.capture();},
       prepareResize: () => driver.current?.prepareResize(),
       selectTool(value) { if (driver.current?.selectTool(value)) setTool(value); },
       invert: () => driver.current?.invert(), reset: () => driver.current?.reset(),

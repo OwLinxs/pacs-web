@@ -16,6 +16,7 @@
     "@cornerstonejs/metadata": "5.11.0",
     "@cornerstonejs/tools": "5.11.0",
     "events": "3.3.0",
+    "pdf-lib": "1.17.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

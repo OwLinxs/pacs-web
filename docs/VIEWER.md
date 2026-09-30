@@ -7,6 +7,7 @@
 - **Viewer V2: VALIDADO COM DICOM REAL**, conforme validação informada pelo responsável: séries, stack, scroll, quatro Arrow keys, Window/Level, Zoom, Pan, Length, Angle, Probe, Rectangle ROI, Invert, Reset e troca de ferramentas.
 - **Viewer V3:** thumbnails, layouts, múltiplos viewports, viewport ativo, Cine e gerenciamento de annotations. Teste manual no ambiente PACS apresentou funcionamento geral satisfatório, conforme informado pelo responsável.
 - **Viewer V4: VALIDADO COM DICOM REAL**, conforme informado pelo responsável pelo PACS: auto-layout, 1x1/1x2/2x2, múltiplos viewports, maximização, séries, stack, thumbnails, Cine, Window/Level, Zoom, Pan, Length, Angle, Probe, Rectangle ROI, annotations, Invert, Rotate, Flip H/V, Fit, Reset e atalhos. A validação real foi externa ao desenvolvimento; nenhuma conexão ao Orthanc real ou deploy foi realizada nesta entrega.
+- **Viewer V5 — Exportação clínica: IMPLEMENTADO LOCALMENTE**, ainda sem validação real: imagem atual do viewport ativo em PNG/JPEG/PDF, com ou sem identificação; fluxo e limitações em [VIEWER_EXPORT.md](VIEWER_EXPORT.md).
 
 ## Correção pontual na entrega Worklist V2
 

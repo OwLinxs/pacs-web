@@ -12,6 +12,7 @@ import (
 
 // Closed vocabulary; no map[string]any or free-form JSON enters the audit log.
 var Events = []Event{
+	EventViewerImageExported,
 	EventUserCreated, EventUserUpdated, EventUserActivated, EventUserDeactivated,
 	EventUserAccessRenewed, EventUserPasswordReset, EventUserPasswordChanged, EventUserUnitsChanged,
 	EventUnitCreated, EventUnitUpdated, EventUnitActivated, EventUnitDeactivated,
@@ -28,6 +29,8 @@ func Known(e Event) bool {
 }
 func Category(e Event) string {
 	switch {
+	case e == EventViewerImageExported:
+		return "viewer"
 	case strings.HasPrefix(string(e), "USER_"):
 		return "users"
 	case strings.HasPrefix(string(e), "UNIT_"):
@@ -45,6 +48,14 @@ var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,63}$`)
 
 func SafeDetail(e Event, detail string) string {
 	switch Category(e) {
+	case "viewer":
+		for _, f := range []string{"PNG", "JPEG", "PDF"} {
+			for _, identified := range []bool{true, false} {
+				if detail == ExportDetail(f, identified) {
+					return detail
+				}
+			}
+		}
 	case "users":
 		raw := strings.TrimPrefix(detail, "target_user_id=")
 		if id, err := uuid.Parse(raw); err == nil && id != uuid.Nil && id.String() == raw && detail == "target_user_id="+raw {
@@ -116,13 +127,13 @@ func insert(ctx context.Context, db executor, e Entry) error {
 	if !Known(e.Event) {
 		return ErrInvalid
 	}
-	if (Category(e.Event) == "users" || Category(e.Event) == "units" || e.Event == EventOrthancSettingsChanged) && (e.ActorUserID == nil || *e.ActorUserID == uuid.Nil) {
+	if (Category(e.Event) == "users" || Category(e.Event) == "units" || e.Event == EventOrthancSettingsChanged || e.Event == EventViewerImageExported) && (e.ActorUserID == nil || *e.ActorUserID == uuid.Nil) {
 		return ErrInvalid
 	}
 	if Category(e.Event) == "units" && (e.UnitID == nil || *e.UnitID == uuid.Nil) {
 		return ErrInvalid
 	}
-	if Category(e.Event) == "users" && e.Detail == "" {
+	if (Category(e.Event) == "users" || Category(e.Event) == "viewer") && e.Detail == "" {
 		return ErrInvalid
 	}
 	detail := SafeDetail(e.Event, e.Detail)
@@ -143,4 +154,12 @@ func insert(ctx context.Context, db executor, e Entry) error {
 		return ErrUnavailable
 	}
 	return nil
+}
+
+func ExportDetail(format string, identified bool) string {
+	flag := "false"
+	if identified {
+		flag = "true"
+	}
+	return "format=" + format + ";identified=" + flag
 }

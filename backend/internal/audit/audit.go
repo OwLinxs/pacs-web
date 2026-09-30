@@ -21,6 +21,7 @@ type Event string
 
 // Eventos implementados nesta etapa.
 const (
+	EventViewerImageExported Event = "VIEWER_IMAGE_EXPORTED"
 	EventUserCreated         Event = "USER_CREATED"
 	EventUserUpdated         Event = "USER_UPDATED"
 	EventUserActivated       Event = "USER_ACTIVATED"

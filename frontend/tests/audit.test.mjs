@@ -14,7 +14,7 @@ test('Audit authenticated read-only API: filters, pagination, abort and allowlis
  await api.getAudit({dateFrom:'2026-09-01',dateTo:'2026-09-29',event:'USER_CREATED',category:'users',actorId:'00000001-0000-4000-8000-000000000001',targetUserId:'00000002-0000-4000-8000-000000000001',offset:50,secret:'synthetic'},signal);
 });
 test('Audit labels, timezone, safe details and no arbitrary JSON rendering',()=>{
- assert.equal(Object.keys(eventLabels).length,17);assert.equal(eventLabel('USER_CREATED'),'Usuário criado');assert.equal(eventLabel('unknown'),'Evento histórico não reconhecido');
+ assert.equal(Object.keys(eventLabels).length,18);assert.equal(eventLabel('USER_CREATED'),'Usuário criado');assert.equal(eventLabel('unknown'),'Evento histórico não reconhecido');
  assert.match(auditDate('2026-09-29T02:30:00Z'),/28\/09\/2026.*23:30:00/);assert.equal(auditDate('invalid'),'—');assert.equal(resultLabel('failure'),'Falha');
  assert.equal(detailLabel('PACS/Orthanc: connected'),'Conexão estabelecida.');assert.equal(detailLabel('{"password":"synthetic"}'),'Sem contexto adicional disponível.');assert.equal(detailLabel('target_user_id=arbitrary'),'Sem contexto adicional disponível.');
 });

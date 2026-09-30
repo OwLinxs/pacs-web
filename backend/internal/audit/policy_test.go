@@ -35,7 +35,7 @@ func TestPolicyClosedVocabulary(t *testing.T) {
 			t.Fatal("inventory")
 		}
 	}
-	if len(Events) != 17 {
+	if len(Events) != 18 {
 		t.Fatal("inventory changed")
 	}
 }

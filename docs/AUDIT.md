@@ -1,8 +1,8 @@
 # Auditoria V1
 
-**IMPLEMENTADA; NÃO validada em ambiente real.** Sem deploy, acesso ao PACS real
-ou migration em banco existente nesta entrega. Administração V1, Worklist V2 e
-Viewer V4 conservam suas validações reais anteriores, informadas pelo responsável.
+**VALIDADA EM AMBIENTE REAL**, conforme confirmação posterior do responsável,
+incluindo migration 0004. Viewer V5 acrescenta localmente um evento específico de
+exportação clínica; essa extensão ainda não foi validada em ambiente real.
 
 ## Objetivo e arquitetura
 
@@ -187,10 +187,9 @@ estável ou exportação integral. Cursor pode ser avaliado futuramente.
 Evita varredura textual genérica para esse filtro novo. Índices existentes de
 data, ator e evento são reutilizados; não adicionados índices redundantes em tudo.
 
-Runner continua forward-only/transacional/checksum. 0004 foi testada apenas em
-PostgreSQL 18.6 descartável, inclusive aplicação repetida pelo runner. Criação
-normal do índice pode bloquear escritas na tabela durante a migration: avaliar
-volume e janela antes de implantação autorizada. Nenhuma migration real aplicada.
+Runner continua forward-only/transacional/checksum. Na entrega original, 0004 foi
+testada em PostgreSQL 18.6 descartável; foi aplicada e validada posteriormente no
+ambiente real conforme confirmação do responsável. Migrations aplicadas são imutáveis.
 
 ## Interface
 
@@ -280,3 +279,15 @@ Arquivos modificados:
 - `frontend/src/api/client.ts`
 - `frontend/src/app/AppShell.tsx`
 - `frontend/src/screens/AuditoriaScreen.tsx`
+
+## Extensão local do Viewer V5
+
+`VIEWER_IMAGE_EXPORTED` é evento novo, ainda não validado no ambiente real. O
+endpoint específico `POST /api/viewer/exports` valida formato PNG/JPEG/PDF e
+booleano `identified`, atribui ator da sessão e registra apenas detalhe canônico
+`format=<formato>;identified=<bool>`. Não recebe identificadores de paciente ou
+DICOM. A consulta ADMIN mostra categoria Viewer e rótulo amigável. A chamada é
+feita depois da composição do arquivo e antes do clique de download; a gravação
+não comprova que o arquivo foi salvo. Falha de auditoria é sinalizada ao operador
+após revalidação da sessão; não há transação distribuída com o browser.
+Consulte [VIEWER_EXPORT.md](VIEWER_EXPORT.md).

@@ -128,6 +128,8 @@ func (s *Server) VacuumRateLimiter() { s.loginLimiter.Vacuum() }
 func (s *Server) montarRotas() http.Handler {
 	mux := http.NewServeMux()
 
+	mux.Handle("POST /api/viewer/exports", encadear(http.HandlerFunc(s.handleViewerExport), s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor, user.RoleMedico)))
+
 	// Autenticação.
 	mux.Handle("POST /api/auth/login", http.HandlerFunc(s.handleLogin))
 	mux.Handle("POST /api/auth/logout", encadear(http.HandlerFunc(s.handleLogout), s.requireSession))

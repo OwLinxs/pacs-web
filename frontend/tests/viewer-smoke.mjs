@@ -10,6 +10,7 @@ import { once } from 'node:events';
 import { syntheticDICOM } from './dicom-fixture.mjs';
 import { testViewerTools } from './viewer-tools-browser.mjs';
 import { testViewerV4 } from './viewer-v4-browser.mjs';
+import { testViewerExport } from './viewer-export-browser.mjs';
 import { testViewerV3 } from './viewer-v3-browser.mjs';
 
 const id = (n) => `${String(n).padStart(8, '0')}-00000000-00000000-00000000-00000000`;
@@ -18,6 +19,8 @@ const studyPath = `/api/studies/${study}/series`;
 const instancesPath = `${studyPath}/${series}/instances`;
 const dicomPath = `${instancesPath}/${instance}/dicom`;
 const calls = [];
+const exportAudits=[];
+let exportAuditStatus=204;
 let failImage = false;
 let monochrome1 = false;
 let expireImage = false;
@@ -27,6 +30,8 @@ const server = createServer(async (req, res) => {
   const json = (body) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(body)); };
   res.setHeader('Cache-Control', 'no-store');
   if (path.startsWith('/api/')) calls.push(path);
+  if(path==='/api/viewer/exports'){let raw='';for await(const part of req)raw+=part;exportAudits.push(JSON.parse(raw));res.statusCode=exportAuditStatus;if(exportAuditStatus===204)res.end();else json({error:{code:exportAuditStatus===401?'SESSION_EXPIRED':'UNAVAILABLE',message:'Falha sintética.'}});return;}
+  if (path === '/api/auth/me') res.setHeader('Set-Cookie','pacs_csrf=synthetic; Path=/');
   if (path === '/api/auth/me') return json({ user: { id: 'synthetic-user', name: 'Usuário fictício', username: 'ficticio', role: 'MEDICO', unit: null, active: true, accessValidUntil: null, lastLoginAt: null } });
   if (path === '/api/studies') return json({ items: [{ orthancStudyId: study, studyInstanceUid: '2.25.111111111', studyDate: '20260920', studyTime: '101112', patientName: 'FICTICIO^VIEWER', patientId: 'SYNTH-VIEWER', accessionNumber: 'SYNTH-ACC', studyDescription: 'Padrão sintético', institutionName: 'Instituição fictícia', modalities: ['OT'], seriesCount: 1 }], limit: 25, offset: 0, hasMore: false, nextOffset: null });
   if (path === studyPath) return json({ items: [
@@ -43,7 +48,7 @@ const server = createServer(async (req, res) => {
   if (path === `${studyPath}/${id(7)}/instances`) { await new Promise((resolve) => setTimeout(resolve, 300)); return json({ items: [{ orthancInstanceId: id(70), number: 1 }] }); }
   if (path.endsWith(`/${id(30)}/dicom`) && (failImage || expireImage)) { res.statusCode = expireImage ? 401 : 502; return json({ error: { code: 'FIXTURE_FAILURE', message: 'Falha sintética.' } }); }
   if (expireThumbnail && path.endsWith(`/${id(40)}/dicom`)) { res.statusCode = 401; return json({ error: { code: 'SESSION_EXPIRED', message: 'Sessão expirada.' } }); }
-  if (path.endsWith('/dicom') && path.startsWith(studyPath)) { res.setHeader('Content-Type', 'application/dicom'); return res.end(syntheticDICOM({ monochrome1, calibrated: !path.includes(`/${id(4)}/`), width: path.includes(`/${id(7)}/`) ? 48 : 32, height: path.includes(`/${id(7)}/`) ? 24 : 32 })); }
+  if (path.endsWith('/dicom') && path.startsWith(studyPath)) { res.setHeader('Content-Type', 'application/dicom'); return res.end(syntheticDICOM({ exportMetadata:true, monochrome1, calibrated: !path.includes(`/${id(4)}/`), width: path.includes(`/${id(7)}/`) ? 48 : 32, height: path.includes(`/${id(7)}/`) ? 24 : 32 })); }
   if (path.startsWith('/api/')) { res.statusCode = 404; return json({ error: { code: 'NOT_FOUND', message: 'Recurso fictício ausente.' } }); }
   try {
     const asset = path.startsWith('/assets/') && /^\/assets\/[\w.-]+$/.test(path) ? path.slice(1) : 'index.html';
@@ -107,6 +112,7 @@ try {
   assert.equal(await evaluate('location.pathname'), `/viewer/${study}`);
   assert.ok(calls.includes(studyPath) && calls.includes(instancesPath) && calls.includes(dicomPath));
   assert.ok(await evaluate('Array.from(document.querySelectorAll("canvas")).some(c => c.width > 0 && c.height > 0)'));
+  await testViewerExport({evaluate,command,until,pause,audits:exportAudits,setAuditStatus:status=>{exportAuditStatus=status;}});
   const count = async (text) => { try { await until(() => evaluate(`document.body.textContent.includes(${JSON.stringify(text)})`)); } catch (error) { console.error('Estado sintético:', text, await evaluate('document.body.textContent'), failures, calls.slice(-5)); throw error; } };
   // Eventos reais do Chrome: não dispara KeyboardEvent artificial no <main>.
   const key = async (key) => {
@@ -207,6 +213,7 @@ try {
   await until(()=>evaluate("document.querySelector('[data-viewport=\"image-1\"]').textContent.includes('Imagem 1 / 2')"));
   await expectInvert('false');assert.equal(await invertState(),'false','série em outro viewport inicia OFF');
   console.log('PASS: Invert OFF inicial/Reset — MONOCHROME1, troca de série, auto-layout, outro viewport e ativação manual.');
+  exportAuditStatus=401;await press('Exportar');await evaluate(`document.querySelectorAll('dialog input[type=radio]')[0].click()`);await press('Gerar arquivo');await count('Sua sessão expirou por segurança.');
   assert.equal(failures.length, 0);
   console.log(`PASS: Viewer V4 + regressão V2/V3 — stack sob demanda, setas/scroll, contador, troca de série, vazio, falha e seleção obsoleta. Screenshot: ${output}`);
 } finally {
