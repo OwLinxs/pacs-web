@@ -43,7 +43,7 @@ export function ViewerToolbar({ selected, inverted, disabled, onSelect, onInvert
       {button('Flip Vertical', 'flipVertical', flipVertical, () => onFlip('vertical'), true)}
       {button('Fit', 'fit', undefined, onFit, true, 'F')}
       {button('Reset', 'reset', undefined, onReset)}
-      <span style={{ marginLeft: 'auto', paddingLeft: 12, fontSize: 11, whiteSpace: 'nowrap', color: 'var(--color-neutral-500)' }}>Scroll / setas: imagens</span>
+      <span style={{ marginLeft: 'auto', paddingLeft: 12, fontSize: 11, whiteSpace: 'nowrap', color: 'var(--color-neutral-500)' }}>Roda: zoom · setas: imagens</span>
     </div>
   );
 }

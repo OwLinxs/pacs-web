@@ -33,7 +33,7 @@ export function ViewportPane({ id, active, series, session, signal, load, activa
   const activeRef = useRef(active); activeRef.current = active;
   const [state, setState] = useState<'empty' | 'loading' | 'ready' | 'error'>('empty');
   const [position, setPosition] = useState({ index: 0, total: 0 });
-  const [tool, setTool] = useState<ViewerTool>('WindowLevel');
+  const [tool, setTool] = useState<ViewerTool>('Pan');
   const [presentation, setPresentation] = useState<PresentationState>({ inverted: false, rotation: 0, flipHorizontal: false, flipVertical: false });
   const [playing, setPlaying] = useState(false);
   const [cineFPS, setCineFPS] = useState(10);
@@ -63,7 +63,7 @@ export function ViewportPane({ id, active, series, session, signal, load, activa
     register({
       capture:()=>{if(!driver.current)throw new Error("Imagem indisponível.");return driver.current.capture();},
       prepareResize: () => driver.current?.prepareResize(),
-      selectTool(value) { if (driver.current?.selectTool(value)) setTool(value); },
+      selectTool(value) { const selected = driver.current?.selectTool(value); if (selected) setTool(selected); },
       invert: () => driver.current?.invert(), reset: () => driver.current?.reset(),
       rotate: (delta) => driver.current?.rotate(delta), flip: (axis) => driver.current?.flip(axis), fit: () => driver.current?.fit(),
       step(delta) { playback.stop(); void driver.current?.step(delta); },
@@ -104,16 +104,6 @@ export function ViewportPane({ id, active, series, session, signal, load, activa
   }, [series, load, signal, expired, attempt]);
 
   useEffect(() => { report({ ready: state === 'ready', tool, ...presentation, playing, total: position.total }); }, [state, tool, presentation, playing, position.total, report]);
-  useEffect(() => {
-    const area = element.current?.parentElement;
-    if (!area) return;
-    const wheel = (event: WheelEvent) => {
-      if (!activeRef.current || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || !event.deltaY) return;
-      event.preventDefault(); cine.current?.stop(); void driver.current?.step(Math.sign(event.deltaY));
-    };
-    area.addEventListener('wheel', wheel, { passive: false });
-    return () => area.removeEventListener('wheel', wheel);
-  }, []);
   return <section data-viewport={id} data-active={active} data-maximized={maximized} aria-hidden={hidden} tabIndex={hidden ? -1 : 0} aria-label={`Viewport ${Number(id.slice(-1)) + 1}`} onPointerDownCapture={(event) => { if (!active) event.preventDefault(); activate(); event.currentTarget.focus({ preventScroll: true }); }}
     style={{ position: 'relative', gridColumn: maximized ? '1 / -1' : column, gridRow: maximized ? '1 / -1' : row, zIndex: maximized ? 2 : 0, visibility: hidden ? 'hidden' : 'visible', pointerEvents: hidden ? 'none' : 'auto', minWidth: 0, minHeight: 0, background: 'black', outline: 'none', border: `1px solid ${active ? 'var(--color-accent-400)' : '#252525'}` }}>
     <div ref={element} style={{ position: 'absolute', inset: 0 }} onContextMenu={(event) => event.preventDefault()} />

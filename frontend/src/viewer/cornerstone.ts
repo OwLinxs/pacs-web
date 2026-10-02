@@ -59,7 +59,7 @@ export type StackController = {
   capture: () => ExportSnapshot;
   setStack: (paths: string[], signal: AbortSignal) => Promise<void>;
   step: (delta: number, loop?: boolean) => Promise<void>;
-  selectTool: (tool: ViewerTool) => boolean;
+  selectTool: (tool: ViewerTool) => ViewerTool | null;
   activate: (active: boolean) => void;
   invert: () => void;
   reset: () => void;
@@ -269,7 +269,7 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
     clearAnnotations() { if (active && !busy) { tools.cancel(); session.annotations.clear(imageIds); } },
     deleteSelected() { if (active && !busy && !tools.interacting()) session.annotations.deleteSelected(viewport.getCurrentImageId()); },
     selectTool(tool) {
-      if (busy || lifetime.aborted || currentSignal?.aborted) return false;
+      if (busy || lifetime.aborted || currentSignal?.aborted) return null;
       return tools.select(tool);
     },
     invert() {

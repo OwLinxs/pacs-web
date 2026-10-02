@@ -9,7 +9,8 @@ export async function testViewerAnnotations({ evaluate, command, key, choose, pa
     const p=await point(index,.02,.02); await mouse('mousePressed',p,true); await mouse('mouseReleased',p); await pause(80);
   };
   const draw = async (index) => {
-    await button('Length'); const a=await point(index,.35,.3), b=await point(index,.6,.3);
+    if (await evaluate("document.querySelector('[aria-label=Length]').getAttribute('aria-pressed')") !== 'true') await button('Length');
+    const a=await point(index,.35,.3), b=await point(index,.6,.3);
     await mouse('mouseMoved',a); await mouse('mousePressed',a,true); await pause(210);
     for(let i=1;i<=6;i++){await mouse('mouseMoved',{x:a.x+(b.x-a.x)*i/6,y:a.y},true);await pause(20);}
     await mouse('mouseReleased',b); await until(async()=> /mm|px/.test(await svg(index))); await pause(120);

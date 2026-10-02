@@ -1,16 +1,16 @@
 # PACS Web — contexto para continuidade
 
 Documento principal de continuidade do **novo PACS Web da Prefeitura Municipal
-de Francisco Beltrão**. Consolida código/documentação do repositório e o estado
-operacional informado pelo responsável. As validações reais e migrations 0001–0004
-são informações do responsável. Viewer V5 é implementação local sem deploy.
+de Francisco Beltrão**. Revisado contra o repositório em 01/10/2026. Distingue
+estado do código de operações informadas pelo responsável, sem acesso ao servidor
+ou a `.env` real nesta consolidação. Leia antes de qualquer alteração.
 
 ## Estado funcional confirmado
 
 | Entrega | Estado atual |
 | --- | --- |
 | Auditoria V1 | **VALIDADA EM AMBIENTE REAL**, conforme confirmação posterior do responsável; migration 0004 aplicada |
-| Viewer V5 — exportação | **IMPLEMENTADO LOCALMENTE**, sem validação real ou deploy |
+| Viewer V5 — exportação | **IMPLEMENTADO NO CÓDIGO**; validação real/deploy específicos de V5 não confirmados nesta sessão |
 | Worklist V2 | **VALIDADA EM AMBIENTE REAL**, com integração Orthanc e ExtendedFind disponível no Orthanc utilizado |
 | Viewer V4 | **VALIDADO COM DICOM REAL**; Invert OFF inicial e após Reset |
 | Administração V1 — Etapa 1: Unidades | **VALIDADA EM AMBIENTE REAL**; migration 0002 aplicada |
@@ -26,13 +26,29 @@ definitiva do sistema atual.
 
 ## Arquitetura e localização do código
 
-`Browser React/TypeScript → API Go autenticada → Orthanc REST`.
+```text
+Clientes --HTTPS--> pacs.franciscobeltrao.com.br --> Nginx Proxy Manager
+                                                       | HTTP interno
+                                                       v
+                                                PACS Web (Go + React)
+                                                 |               |
+                                                 v               v
+                                       PostgreSQL PACS Web   Orthanc HTTP interno
+                                                                |          |
+                                                                v          v
+                                                      PostgreSQL Orthanc  TrueNAS/NFS DICOM
+Modalidades DICOM --C-STORE--> Orthanc :4242
+```
+
+Fluxo da aplicação: `Browser React/TypeScript → API Go autenticada → Orthanc REST`.
 O PostgreSQL da aplicação guarda usuários, sessões, auditoria, unidades e
 configurações; permanece logicamente separado do banco interno do Orthanc.
 Orthanc continua sendo o PACS/DICOM e mantém o armazenamento DICOM fora da
 aplicação; o gateway não duplica arquivos persistentemente. O backend comunica-se
 internamente com Orthanc. O navegador não recebe seu endereço interno nem credenciais.
-Autenticação própria, sem Keycloak. Preservar o design existente, Worklist clara
+Autenticação própria, sem Keycloak. **OHIF + Keycloak + oauth2-proxy antigos
+permanecem como rollback**: não remover containers, dados, autenticação, proxy ou
+configuração sem decisão explícita. Preservar o design existente, Worklist clara
 e Viewer escuro, sem redesenho ou refatorações fora do escopo autorizado.
 
 - `backend/cmd/server`: composição e comandos serve, migrate, admin create e keygen.
@@ -59,15 +75,21 @@ O Dockerfile faz build multi-stage de frontend e backend; imagem final executa
 como usuário sem privilégios e serve SPA/API na mesma origem. No Compose atual,
 app usa a rede própria da aplicação e uma rede Docker externa do PACS para
 alcançar Orthanc; PostgreSQL 18 fica na rede própria, com volume persistente
-separado. O Compose principal não publica a porta do PostgreSQL no host e publica
-a aplicação no loopback. O Compose de desenvolvimento publica apenas o banco
-em loopback. Isso descreve arquivos do repositório, não uma inspeção de containers.
-Não assumir HTTPS público já liberado: publicação controlada é etapa futura.
+separado. O Compose principal não publica PostgreSQL no host. **Estado atual do
+arquivo:** publicação da aplicação no IP específico do host definido em
+`docker-compose.yml`, com porta do host `${APP_PORT:-8080}` e 8080 no container.
+O responsável informa uso operacional da porta **8082**, restrita por firewall
+ao NPM; o valor efetivo de `APP_PORT` e a regra não foram inspecionados aqui.
+O Compose de desenvolvimento publica apenas o banco em loopback.
+`HARDENING.md`/`BACKEND.md` ainda descrevem bind do app em loopback: essa parte
+diverge do Compose versionado atual. NPM faz a terminação HTTPS segundo o relato
+operacional; não inferir o estado de TLS/firewall apenas dos arquivos do projeto.
 
 Configuração/segredos são fornecidos em execução; não reproduzir valores de
 DATABASE_URL, PACS_MASTER_KEY ou arquivos .env. Preservar banco, armazenamento,
-redes e serviços existentes; não expor Orthanc 8042 publicamente e não alterar
-DICOM 4242. Não executar comandos de infraestrutura durante revisão documental.
+redes e serviços existentes; HTTP Orthanc 8042 continua interno, DICOM 4242 deve
+continuar operacional. TrueNAS/NFS para DICOM e NFS separado para backups são
+informações operacionais do responsável; não foram inspecionados no repositório.
 
 ## Autenticação, autorização e auditoria atuais
 
@@ -131,7 +153,8 @@ Expand, Since/Limit com sentinela; não carrega todo o acervo.
   ausências/valores inválidos exibidos como travessão, sem descrição inventada.
 - **Preferência final de UI:** removidos controles avulsos Ordenação, Modalidade
   e Por página. Página fixa em 25; clicar no cabeçalho Data/Hora alterna ordem.
-  Modalidade continua suportada na API e exibida na tabela.
+  Modalidade continua suportada na API e exibida na tabela. O filtro de
+  instituição é texto DICOM; não há filtro clínico por vínculo à entidade `units`.
 - Estados explícitos: loading, refreshing, error/retry, empty e sessão expirada.
 - Anterior/Próxima com hasMore, sem total fictício; Atualizar mantém filtros e
   volta à primeira página. Sem polling. Debounce 350 ms, AbortController e
@@ -145,7 +168,8 @@ Expand, Since/Limit com sentinela; não carrega todo o acervo.
 V0 pipeline real; V1 séries/stack; V2 ferramentas; V3 múltiplos viewports;
 **V4 validado com DICOM real pelo responsável**, conforme histórico documentado.
 Essa validação externa não autoriza testes contra PACS real em desenvolvimento.
-Viewer V5 adiciona exportação da imagem atual como PNG/JPEG/PDF, implementada localmente;
+Viewer V5 adiciona exportação da imagem atual como PNG/JPEG/PDF, presente no código,
+mas sem validação real específica confirmada;
 consulta [VIEWER_EXPORT.md](VIEWER_EXPORT.md). Invert OFF inicial/Reset permanece.
 
 Gateway autenticado, autorizado para os três perfis, valida parentesco:
@@ -167,6 +191,13 @@ Rectangle ROI, Invert, Rotate ±90°, Flip H/V, Fit e Reset. Redução de layout
 destrói slots removidos e para Cine; expansão restaura atribuições de séries,
 não toda sua apresentação anterior. Maximização não destrói os outros slots.
 
+**Mapeamento de mouse implementado localmente nesta entrega:** esquerdo = Pan
+por padrão (medição selecionada assume temporariamente; novo clique a desativa),
+direito = Window/Level e roda = Zoom, sem navegação do stack. Setas continuam a
+navegação. Bindings são limpos/reaplicados por ToolGroup de viewport; o menu de
+contexto é bloqueado só no viewport. Requer validação real controlada antes de
+ser marcado como validado em produção.
+
 **Invert inicia OFF em toda nova série/viewport e volta OFF no Reset**, inclusive
 MONOCHROME1; ativação manual permanece possível. **Não alterar esse comportamento
 sem decisão futura explícita.**
@@ -181,17 +212,52 @@ Cine 1–30 FPS (default 10) manual, sem significado clínico garantido; sem MPR
 hanging protocol, sincronização, download, impressão ou persistência de medições.
 Cleanup de timers, listeners, observers, grupos/engine e requests deve ser mantido.
 
-## Banco e migrations — 0001, 0002 e 0003 aplicadas
+### Exportação V5 presente no código — validação real específica não confirmada
+
+Somente a imagem atual do viewport ativo; PNG sem perda, JPEG qualidade 0,95 e
+PDF com `pdf-lib` 1.17.1 carregado sob demanda. A captura usa
+`StackViewport.getCanvas()` e composição temporária separada, preservando imagem,
+WL, zoom, pan, rotação, flip, invert, layout, ferramentas e Cine sem alterar DICOM
+ou estado do Viewer. Overlays HTML e annotations SVG não entram no arquivo.
+Modo identificado usa tags naturalizadas da instância corrente no cache
+Cornerstone: PatientName, PatientID, StudyDate, Modality, StudyDescription,
+InstitutionName, SeriesNumber e InstanceNumber. O nome DICOM é normalizado para
+apresentação; ausências não são inventadas. PNG/JPEG identificados reservam faixa
+fora da anatomia; PDF organiza imagem e texto. Arquivo tem nome neutro, sem
+nome/ID/UID. Objetos temporários permanecem em memória e Object URLs são revogadas.
+
+Modo sem identificação contém somente pixels renderizados, sem texto adicional;
+requer `BurnedInAnnotation=NO` e confirmação visual do operador. **Não é
+anonimização**: PHI gravada nos pixels pode permanecer, e a tag pode estar errada.
+`POST /api/viewer/exports` exige sessão, papel clínico e CSRF. O backend fixa
+`VIEWER_IMAGE_EXPORTED`, ator da sessão e apenas formato/booleano identified;
+não recebe UID/PHI/filename. O evento confirma preparação/solicitação, não o
+salvamento efetivo pelo navegador. Falha de auditoria/expiração segue a política
+em [VIEWER_EXPORT.md](VIEWER_EXPORT.md). Não afirmar validação real de V5 sem
+confirmação posterior do responsável.
+
+## Banco e migrations — 0001–0004 aplicadas segundo o responsável
 
 Runner em `internal/database/migrate.go`, SQL embutido, checksum SHA-256,
-`schema_migrations`, uma transação por migration, somente avanço. **Após o hardening
-local, `serve` em produção apenas verifica checksums/versões e exige role runtime
-sem DDL; `migrate` exige credencial separada. Esta alteração ainda não foi
-implantada.** Em desenvolvimento, `serve` ainda aplica migrations pendentes.
+`schema_migrations`, uma transação por migration, somente avanço. **No código
+atual, `serve` em produção apenas verifica checksums/versões e exige role runtime
+sem DDL; `migrate` exige `MIGRATION_DATABASE_URL` separada.** A efetiva implantação
+da separação de roles/grants no servidor não foi confirmada nesta consolidação.
+Em desenvolvimento, `serve` ainda aplica migrations pendentes.
 **0001, 0002, 0003 e 0004 já estão aplicadas no ambiente atual**,
 conforme confirmação do responsável; 0002/0003 também foram validadas funcionalmente.
 São imutáveis: não editar esses arquivos nem seus checksums. Qualquer alteração
 futura de schema deve utilizar nova migration. Auditoria V1 acrescentou 0004, também aplicada e validada posteriormente no ambiente real conforme o responsável.
+
+Role runtime: CONNECT no banco, USAGE no schema, DML apenas nas tabelas da
+aplicação, USAGE/SELECT na sequência de auditoria e SELECT em
+`schema_migrations`; sem DDL/superuser nem herança da role de migration.
+O Compose fornece `DATABASE_URL` ao `app` via `APP_DATABASE_URL` e não injeta a
+credencial de migration no serviço contínuo. Para mudança futura de schema:
+criar **nova** migration, revisar backup/rollback, aplicar em janela controlada
+com `migrate` e role separada, reaplicar grants mínimos aos objetos novos e só
+então iniciar/atualizar `serve`. Nunca executar migrations automaticamente em
+produção nem reproduzir DSNs ou passwords na documentação.
 
 | Migration | Objetivo |
 | --- | --- |
@@ -359,13 +425,36 @@ falha no segundo evento. Frontend typecheck/build, 31 testes Node e Chrome Audit
 Usuários, Unidades, Worklist e Viewer V2/V3/V4 + Invert OFF passaram. Fixtures
 sintéticas; nenhum banco existente ou Orthanc real acessado. Detalhes: [AUDIT.md](AUDIT.md).
 
-## Hardening pré-produção — implementado localmente, não implantado
+## Hardening — código versionado; implantação de controles não verificada aqui
 
-Ver [HARDENING.md](HARDENING.md) para configuração operacional e revisão individual dos avisos npm. As alterações locais não foram aplicadas no ambiente real. `serve` em produção agora verifica migrations/checksums e privilégio da role runtime sem executar DDL; `migrate` exige DSN privilegiada separada. O Compose recebe `APP_DATABASE_URL` da role runtime. `PUBLIC_ORIGIN` HTTPS e `TRUSTED_PROXY_CIDRS` explícitos são obrigatórios em produção. Rate limit falha fechado na saturação, usa X-Forwarded-For somente de peers confiáveis e restringe Argon2 a dois logins simultâneos; parser PHC possui tetos. CSRF em produção exige Origin/Referer da origem pública HTTPS. Erros/panics e paths arbitrários não entram nos logs; logout local aguarda confirmação da revogação remota. `.dockerignore` cobre raiz e subdiretórios. `fflate` 0.7.5 foi fixado sem upgrade major; audit passou de 12 para 10 pacotes reportados.
+Ver [HARDENING.md](HARDENING.md) para configuração operacional e revisão individual
+dos avisos npm. O Git contém o hardening, mas não houve verificação aqui de sua
+aplicação integral no servidor. `serve` em produção verifica migrations/checksums
+e privilégios da role runtime sem DDL; `migrate` exige credencial separada. O
+Compose usa `APP_DATABASE_URL` para a role runtime. `PUBLIC_ORIGIN` HTTPS e
+`TRUSTED_PROXY_CIDRS` explícitos são obrigatórios em produção. Rate limit falha
+fechado na saturação, usa X-Forwarded-For somente de peers confiáveis, limita
+Argon2 a dois logins simultâneos; parser PHC possui tetos. CSRF em produção
+exige Origin/Referer da origem pública HTTPS. Logs omitem query/body/IDs de
+rotas clínicas e erros internos; logout local aguarda confirmação de revogação
+ou 401. Cookies de sessão são HttpOnly, Secure e SameSite=Lax. `.dockerignore`
+cobre `.env`/variantes na raiz e subdiretórios. Secrets devem ficar fora do Git.
+`fflate` 0.7.5 foi fixado sem upgrade major; inventário npm de 30/09/2026 caiu
+de 12 para 10 pacotes reportados. Não executar `npm audit fix` automaticamente.
 
-Ainda pendem **antes da produção**: provisionar/testar role runtime e grants mínimos; configurar e validar NPM/HTTPS/proxy CIDR/Host/forwarded headers; rotação controlada de credenciais/secrets anteriormente expostos (inclusive regravação segura da credencial Orthanc sob nova chave); validação browser real dos novos controles e revisão dos 10 avisos npm restantes com base no upstream. Rate limit é por processo, portanto escalonamento horizontal requer controle adicional no proxy. Não houve rotação, migration ou deploy nesta etapa.
+Ainda exigem confirmação/ação controlada antes da abertura definitiva: testar a
+role runtime/grants efetivos; revisar NPM/HTTPS/proxy CIDR/Host/forwarded
+headers e firewall; rotação controlada de credenciais/secrets anteriormente
+expostos (incluindo regravação segura da credencial Orthanc sob nova chave);
+revisão dos 10 avisos npm restantes com base no upstream. Rate limit é por
+processo, portanto escalonamento horizontal requer controle adicional no proxy.
+Rotação não foi executada por esta consolidação.
 
-Permanecem como dívidas não resolvidas por este escopo: deadlines de todas as queries, concorrência de edição das configurações e entre runners de migration, política de retenção da auditoria, eventos não transacionais best-effort (login/logout/teste PACS), warnings de bundle Vite e revisão de logs/configuração no proxy. Viewer V5 segue local e requer validação controlada.
+Permanecem como dívidas: deadlines de todas as queries, concorrência de edição
+das configurações e entre runners de migration, política de retenção da auditoria,
+eventos não transacionais best-effort (login/logout/teste PACS), warnings de
+bundle Vite e revisão de logs/configuração no proxy. Viewer V5 requer validação
+real específica antes de ser marcado como tal.
 
 ## Divergências e trechos históricos que não devem orientar novas implementações
 
@@ -382,6 +471,11 @@ Permanecem como dívidas não resolvidas por este escopo: deadlines de todas as 
   no início do arquivo. Invert inicial/Reset OFF é a decisão vigente.
 - Registros históricos podem descrever ausência de rede PACS; o Compose conecta
   o app à rede externa do Orthanc para a API interna. O PostgreSQL permanece separado.
+- `HARDENING.md` e `BACKEND.md` ainda dizem que o Compose publica o app em
+  `127.0.0.1`; `docker-compose.yml` atual vincula ao IP específico do host.
+  Porta host depende de `APP_PORT`; 8082 foi informada operacionalmente, não
+  verificada neste arquivo. O `README.md` também contém instruções antigas de
+  auto-migration em produção; prevalece o código atual de `serve`/`migrate`.
 - DECISOES.md contém decisão histórica de conta compartilhada por unidade. O
   modelo vigente possui usuários MEDICO/GESTOR com múltiplas unidades e senha
   individual/troca obrigatória; não implementar contas compartilhadas com base
@@ -396,14 +490,63 @@ Permanecem como dívidas não resolvidas por este escopo: deadlines de todas as 
 Essas divergências históricas continuam registradas. Na entrega Auditoria V1,
 ADMINISTRATION/USERS/BACKEND foram atualizados apenas quanto à nova auditoria.
 
-## Próximas etapas planejadas — sem execução automática
+## Deploy, reboot e backups — informações operacionais fornecidas
 
-1. Revisão controlada do **Viewer V5 implementado localmente**: [VIEWER_EXPORT.md](VIEWER_EXPORT.md).
-2. **HARDENING / PRÉ-PRODUÇÃO:** revisar e tratar dívidas restantes.
-3. Publicação HTTPS controlada; depois piloto controlado.
-4. Somente após essas etapas avaliar substituição definitiva do sistema atual.
+Workflow informado: `desenvolvimento/Codex → Git → GitHub privado → servidor →
+git pull --ff-only → build/deploy controlado`. Não alterar código diretamente
+no servidor. `.env` real fica fora do Git. Para validar Compose, usar apenas
+`docker compose config --quiet`; `docker compose config` sem `--quiet` pode
+imprimir secrets. Alterações em produção devem ocorrer uma de cada vez, com
+teste/rollback definidos. Esta consolidação não fez commit, push ou deploy.
+Histórico Git recente conferido: `bbdc7d5` (bind do Compose ao host PACS,
+30/09/2026), `c9ba867` (hardening, 30/09), `84d05a6` (exportação V5,
+30/09), `862c668` (Auditoria V1, 29/09), `7a5e1b2` (Usuários, 29/09).
+Esses commits comprovam estado versionado, não execução operacional.
 
-Este planejamento não autoriza deploy, migrations reais ou etapas adicionais.
+O responsável informou **reboot controlado validado com sucesso**: mounts NFS
+do storage DICOM e de backup retornaram automaticamente; storage Orthanc e backup
+disponíveis; Orthanc e seu PostgreSQL voltaram; PACS Web e PostgreSQL da aplicação
+voltaram healthy; stack legado voltou; regra de firewall da porta PACS Web
+persistiu; NPM alcançou health/readiness e HTTPS funcionou; login, Worklist,
+abertura de estudo no Viewer e carregamento de imagens funcionaram; DICOM 4242
+voltou e C-ECHO respondeu Success. **A data exata dessa validação não consta no
+repositório nem no histórico disponível a esta sessão; confirmar no registro
+operacional antes de atribuir uma data.** Esses testes não confirmam por si sós
+deploy/validação real específicos da exportação V5 ou grants da role runtime.
+
+Backup do PostgreSQL PACS Web, conforme informado: `pg_dump` em formato custom
+testado; `pg_restore` em banco isolado, estrutura/tabelas conferidas, banco de
+teste removido; backup armazenado no NFS de backup. O script externo ao
+repositório `/usr/local/sbin/pacs-web-db-backup.sh` está **em andamento**. O último
+passo confirmado foi criar/testar a proteção que exige `/mnt/pacs-backup`
+montado. Uma versão posterior com `pg_dump` estava em preparação/teste; **não
+afirmar que backup automatizado do PACS Web esteja concluído**. O responsável
+também informou backup completo da VM por Proxmox e job automático configurado;
+retenção e resultados recentes não estão confirmados aqui.
+
+ClearCanvas é o acervo legado; migração V5 foi informada como validada e V6
+planejada. Não existe implementação/protocolo dessa migração neste repositório.
+Preservar suas validações, manter migração separada de mudanças no Viewer e
+não afetar C-STORE 4242. Não usar dados reais de pacientes em testes/docs.
+
+## Controles do mouse — implementação local pendente de validação real
+
+O padrão solicitado acima substitui o listener de wheel para stack. A mudança
+foi isolada no frontend Viewer; não alterou exportação, backend, banco ou
+dependências. O comportamento anterior de scroll para imagens em trechos
+históricos de [VIEWER.md](VIEWER.md) não descreve mais o código atual.
+
+### Tarefa posterior separada — NÃO implementar agora
+
+Após validar o mouse, avaliar overlays DICOM **somente na exportação identificada
+derivada**, distribuídos pelas bordas como em imagens radiológicas clínicas.
+Mostrar apenas tags presentes: identificação, idade/sexo/data, data/hora,
+série/imagem, lateralidade, parâmetros técnicos, instituição, WL/zoom e outros
+metadados pertinentes; nunca inventar ausências. Modo não identificado não deve
+incluir PHI e mantém a proteção atual contra identificação gravada nos pixels.
+A imagem de referência discutida contém dados identificáveis: **não copiá-la ao
+repositório, fixtures ou documentação, nem reproduzir seus dados**. Registra-se
+apenas o padrão visual desejado. Não misturar esta tarefa com a do mouse.
 
 ## Regras permanentes
 
@@ -421,6 +564,10 @@ Este planejamento não autoriza deploy, migrations reais ou etapas adicionais.
 - Não alterar Docker/rede/firewall/proxies ou infraestrutura fora do escopo.
 - Não implementar features adicionais do Viewer/Worklist, MPR/3D, escrita DICOM,
   integrações RIS/HL7/FHIR/MWL ou novos módulos sem uma etapa autorizada.
+- Ler este documento na próxima sessão; trabalhar incrementalmente, uma alteração
+  por vez, testar antes de avançar, não implementar tarefas futuras junto da atual.
+- Preservar o stack legado como rollback. Avaliar impacto antes de modificar
+  NPM, firewall, Docker, redes, TrueNAS/NFS ou qualquer infraestrutura.
 
 Referências detalhadas: [BACKEND.md](BACKEND.md),
 [ORTHANC_CONNECTION.md](ORTHANC_CONNECTION.md), [WORKLIST.md](WORKLIST.md),

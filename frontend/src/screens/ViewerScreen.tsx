@@ -120,7 +120,7 @@ export function ViewerScreen({ studyId, study, onVoltar, onLogout, onSessionExpi
           </button>
         </div>
       </header>
-      <ViewerToolbar selected={state?.tool ?? 'WindowLevel'} inverted={state?.inverted ?? false} flipHorizontal={state?.flipHorizontal ?? false} flipVertical={state?.flipVertical ?? false} disabled={!state?.ready}
+      <ViewerToolbar selected={state?.tool ?? 'Pan'} inverted={state?.inverted ?? false} flipHorizontal={state?.flipHorizontal ?? false} flipVertical={state?.flipVertical ?? false} disabled={!state?.ready}
         onSelect={(value) => controls.current[active]?.selectTool(value)}
         onRotate={(delta) => controls.current[active]?.rotate(delta)} onFlip={(axis) => controls.current[active]?.flip(axis)} onFit={() => controls.current[active]?.fit()}
         onInvert={() => controls.current[active]?.invert()} onReset={() => controls.current[active]?.reset()} />

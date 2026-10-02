@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { syntheticDICOM } from './dicom-fixture.mjs';
 import { testViewerTools } from './viewer-tools-browser.mjs';
+import { testViewerMouse } from './viewer-mouse-browser.mjs';
 import { testViewerV4 } from './viewer-v4-browser.mjs';
 import { testViewerExport } from './viewer-export-browser.mjs';
 import { testViewerV3 } from './viewer-v3-browser.mjs';
@@ -123,8 +124,13 @@ try {
   const choose = async (index) => { await evaluate(`document.querySelectorAll('aside button')[${index}].click()`); };
   const files = () => calls.filter((path) => path.endsWith('/dicom'));
   assert.ok(files().every(path => !path.includes(`/${id(30)}/`) && !path.includes(`/${id(31)}/`) && !path.includes(`/${id(41)}/`)), 'miniaturas usam somente primeira instância');
-  await evaluate("window.fixtureEngine = document.querySelector('main canvas')");
   assert.equal(await evaluate("document.querySelector('[aria-label=Invert]').getAttribute('aria-pressed')"), 'false', 'primeiro viewport inicia Invert OFF');
+  await testViewerMouse({ evaluate, command, pause, until });
+  await evaluate("document.querySelector('header button').click()");
+  await until(() => evaluate("!!document.querySelector('[role=button]')"));
+  await evaluate("document.querySelector('[role=button]').click()");
+  await count('Imagem 1 / 3');
+  await evaluate("window.fixtureEngine = document.querySelector('main canvas')");
   await testViewerTools({ evaluate, command, key, count, choose, pause, until });
   const loadedAfterTools = files().filter(path => path.endsWith(`/${id(30)}/dicom`)).length;
   // Reproduz perda de foco do main que não era coberta no V1.
@@ -132,9 +138,11 @@ try {
   await key('ArrowRight'); await count('Imagem 2 / 3');
   assert.equal(files().filter(path => path.endsWith(`/${id(30)}/dicom`)).length, loadedAfterTools + 1);
   const wheelPoint = await evaluate("(() => {const r=document.querySelector('main canvas').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+  const imageBeforeWheel = await evaluate("document.querySelector('[data-viewport] [role=status]').textContent");
   await command('Input.dispatchMouseEvent', { type:'mouseWheel', ...wheelPoint, deltaX:0, deltaY:100 });
-  await count('Imagem 3 / 3');
-  await key('ArrowDown'); await pause(100); await count('Imagem 3 / 3');
+  await pause(150);
+  assert.equal(await evaluate("document.querySelector('[data-viewport] [role=status]').textContent"), imageBeforeWheel, 'roda não navega imagens');
+  await key('ArrowDown'); await count('Imagem 3 / 3');
   await key('ArrowLeft'); await count('Imagem 2 / 3');
   await key('ArrowUp'); await count('Imagem 1 / 3');
   await key('ArrowLeft'); await pause(100); await count('Imagem 1 / 3');
@@ -215,7 +223,7 @@ try {
   console.log('PASS: Invert OFF inicial/Reset — MONOCHROME1, troca de série, auto-layout, outro viewport e ativação manual.');
   exportAuditStatus=401;await press('Exportar');await evaluate(`document.querySelectorAll('dialog input[type=radio]')[0].click()`);await press('Gerar arquivo');await count('Sua sessão expirou por segurança.');
   assert.equal(failures.length, 0);
-  console.log(`PASS: Viewer V4 + regressão V2/V3 — stack sob demanda, setas/scroll, contador, troca de série, vazio, falha e seleção obsoleta. Screenshot: ${output}`);
+  console.log(`PASS: Viewer V4 + regressão V2/V3 — stack sob demanda, setas para imagens, roda para Zoom, contador, troca de série, vazio, falha e seleção obsoleta. Screenshot: ${output}`);
 } finally {
   socket?.close(); chrome.kill();
   await once(chrome, 'exit').catch(() => {});

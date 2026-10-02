@@ -22,22 +22,35 @@ export function createViewerTools(element: HTMLDivElement, viewport: StackViewpo
   if (!group) throw new Error('Ferramentas indisponíveis.');
   for (const tool of toolClasses) group.addTool(tool.toolName, tool === ZoomTool ? { minZoomScale: 0.1, maxZoomScale: 20, zoomToCenter: true } : {});
   group.addViewport(viewport.id, engineId);
-  let selected: ViewerTool = 'WindowLevel';
+  let selected: ViewerTool = 'Pan';
   let suspended = true;
   const apply = () => {
     for (const tool of toolClasses) {
       if (suspended) group.setToolEnabled(tool.toolName);
       else group.setToolPassive(tool.toolName, { removeAllBindings: true });
     }
-    if (!suspended) group.setToolActive(selected, { bindings: [{ mouseButton: Enums.MouseBindings.Primary }] });
+    if (!suspended) {
+      group.setToolActive(WindowLevelTool.toolName, { bindings: [
+        { mouseButton: Enums.MouseBindings.Secondary },
+        ...(selected === 'WindowLevel' ? [{ mouseButton: Enums.MouseBindings.Primary }] : []),
+      ] });
+      group.setToolActive(ZoomTool.toolName, { bindings: [
+        { mouseButton: Enums.MouseBindings.Wheel },
+        ...(selected === 'Zoom' ? [{ mouseButton: Enums.MouseBindings.Primary }] : []),
+      ] });
+      if (selected !== 'WindowLevel' && selected !== 'Zoom') {
+        group.setToolActive(selected, { bindings: [{ mouseButton: Enums.MouseBindings.Primary }] });
+      }
+    }
   };
   apply();
   return {
-    select(tool: ViewerTool) {
-      if (suspended) return false;
+    select(tool: ViewerTool): ViewerTool | null {
+      if (suspended) return null;
       cancelActiveManipulations(element);
-      selected = tool; apply();
-      return true;
+      selected = tool === selected && ['Length', 'Angle', 'Probe', 'RectangleROI'].includes(tool) ? 'Pan' : tool;
+      apply();
+      return selected;
     },
     cancel: () => cancelActiveManipulations(element),
     interacting: () => state.isInteractingWithTool || state.isMultiPartToolActive,
