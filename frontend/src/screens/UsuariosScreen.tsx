@@ -3,6 +3,7 @@ import { api, ApiError, type ManagedUser, type Unit, type UsersPage, type Validi
 import { useSession } from '../auth/SessionProvider';
 import { BlueprintCorners } from '../design-system/Blueprint';
 import { Icon } from '../design-system/Icon';
+import { ImportarMedicosDialog } from '../users/ImportarMedicosDialog';
 
 type Form = { mode: 'create' | 'edit' | 'renew' | 'reset'; role: 'MEDICO' | 'GESTOR'; target?: ManagedUser; name: string; username: string; email: string; unitIds: string[]; validity: Validity; password: string };
 const periods: [Validity,string][] = [['1m','1 mês'],['3m','3 meses'],['6m','6 meses'],['1y','1 ano'],['unlimited','Sem expiração']];
@@ -11,11 +12,12 @@ const statusLabel = { active: 'Ativo', inactive: 'Inativo', expired: 'Expirado' 
 const fresh = (role: Form['role']): Form => ({mode:'create',role,name:'',username:'',email:'',unitIds:[],validity:'3m',password:''});
 
 export function UsuariosScreen({ onSessionExpired, onToast, modalInicial = false }: { onSessionExpired: () => void; onToast: (text:string) => void; modalInicial?: boolean }) {
- const {user}=useSession();const admin=user?.role==='ADMIN';
+ const {user}=useSession();const admin=user?.role==='ADMIN';const canImport=admin||user?.role==='GESTOR';
  const [page,setPage]=useState<UsersPage|null>(null),[loading,setLoading]=useState(true),[saving,setSaving]=useState(false);
  const [error,setError]=useState(''),[formError,setFormError]=useState('');
  const [search,setSearch]=useState(''),[role,setRole]=useState(''),[unitId,setUnitId]=useState(''),[status,setStatus]=useState(''),[offset,setOffset]=useState(0),[revision,setRevision]=useState(0);
  const [form,setForm]=useState<Form|null>(modalInicial?fresh('MEDICO'):null);
+ const [importOpen,setImportOpen]=useState(false);
  const [units,setUnits]=useState<Unit[]>([]),[unitOffset,setUnitOffset]=useState(0),[nextUnits,setNextUnits]=useState<number|null>(null),[unitError,setUnitError]=useState(''),[unitsLoading,setUnitsLoading]=useState(true);
  const mutation=useRef<AbortController|null>(null);
  useEffect(()=>()=>{mutation.current?.abort();},[]);
@@ -55,7 +57,7 @@ export function UsuariosScreen({ onSessionExpired, onToast, modalInicial = false
  const options=[...units,...linked.filter(u=>!units.some(v=>v.id===u.id))];
  const title=form?.mode==='edit'?'Editar usuário':form?.mode==='renew'?'Renovar acesso':form?.mode==='reset'?'Redefinir senha':form?.role==='GESTOR'?'Novo gestor':'Novo médico';
  return <div style={{padding:'32px 40px 48px',display:'flex',flexDirection:'column',gap:20}}>
-  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}><h1 style={{margin:0,fontSize:40}}>Usuários</h1><div style={{display:'flex',gap:10}}><button className="btn btn-primary" disabled={busy||!!form} onClick={()=>open('create')}><Icon name="plus"/> Novo médico</button>{admin&&<button className="btn btn-secondary" disabled={busy||!!form} onClick={()=>open('create',undefined,'GESTOR')}>Novo gestor</button>}</div></div>
+  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}><h1 style={{margin:0,fontSize:40}}>Usuários</h1><div style={{display:'flex',gap:10}}><button className="btn btn-primary" disabled={busy||!!form||importOpen} onClick={()=>open('create')}><Icon name="plus"/> Novo médico</button>{canImport&&<button className="btn btn-secondary" disabled={!!form||importOpen} onClick={()=>setImportOpen(true)}>Importar médicos</button>}{admin&&<button className="btn btn-secondary" disabled={busy||!!form||importOpen} onClick={()=>open('create',undefined,'GESTOR')}>Novo gestor</button>}</div></div>
   <p style={{margin:0,color:'var(--color-neutral-700)'}}>Gerencie acessos, unidades e validade.{!admin&&' Seu perfil administra somente médicos.'}</p>
   <div style={{display:'flex',gap:12,alignItems:'end',flexWrap:'wrap'}}>
    <div className="field" style={{flex:1,minWidth:220}}><label htmlFor="users-search">Buscar nome ou usuário</label><input id="users-search" className="input" maxLength={120} value={search} onChange={e=>{setSearch(e.target.value);setOffset(0);}}/></div>
@@ -82,6 +84,7 @@ export function UsuariosScreen({ onSessionExpired, onToast, modalInicial = false
    {error&&<div role="alert" style={{padding:24}}>{error} <button className="btn btn-secondary" onClick={()=>setRevision(v=>v+1)}>Tentar novamente</button></div>}
   </div>
   <div style={{display:'flex',gap:16,alignItems:'center'}}><button className="btn btn-secondary" disabled={busy||offset===0||!!form} onClick={()=>setOffset(v=>Math.max(0,v-25))}>Anterior</button><span>Página {Math.floor(offset/25)+1}</span><button className="btn btn-secondary" disabled={busy||page?.nextOffset==null||!!form} onClick={()=>{if(page?.nextOffset!=null)setOffset(page.nextOffset);}}>Próxima</button></div>
+  {importOpen&&canImport&&<ImportarMedicosDialog units={units} unitsLoading={unitsLoading} nextUnits={nextUnits} loadMoreUnits={()=>{if(nextUnits!==null)setUnitOffset(nextUnits);}} close={()=>setImportOpen(false)}/>}
   {form&&<div role="dialog" aria-modal="true" aria-labelledby="user-form-title" style={{position:'fixed',inset:0,zIndex:30,display:'grid',placeItems:'center',background:'color-mix(in srgb,var(--color-neutral-900) 50%,transparent)'}}>
    <form onSubmit={submit} className="blueprint" style={{position:'relative',width:560,maxHeight:'90vh',overflowY:'auto',padding:28,background:'var(--color-bg)',display:'flex',flexDirection:'column',gap:16}}><BlueprintCorners/><h2 id="user-form-title" style={{margin:0}}>{title}</h2>
     {form.target&&<p style={{margin:0}}>{form.target.username}</p>}

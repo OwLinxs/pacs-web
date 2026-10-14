@@ -15,6 +15,7 @@ ou a `.env` real nesta consolidação. Leia antes de qualquer alteração.
 | Viewer V4 | **VALIDADO COM DICOM REAL**; Invert OFF inicial e após Reset |
 | Administração V1 — Etapa 1: Unidades | **VALIDADA EM AMBIENTE REAL**; migration 0002 aplicada |
 | Administração V1 — Etapa 2: Usuários | **VALIDADA EM AMBIENTE REAL**; backend, frontend, migration 0003 e fluxos implantados/testados com sucesso |
+| Importar médicos — pré-visualização .xlsx | **IMPLEMENTADA LOCALMENTE**; sem criação de usuários, sem deploy ou validação real |
 
 A Etapa 2 foi validada pelo responsável com **contas fictícias**: login do ADMIN
 existente, listagem, criação de MEDICO, múltiplas unidades, edição, validade,
@@ -347,6 +348,23 @@ Detalhes de contrato, segurança e decisões: [USERS.md](USERS.md).
   `/reset-password`; POST `/api/auth/change-password`.
 - Nenhuma associação por estudo, mudança de papel, recuperação por e-mail,
   criação de ADMIN via UI ou exclusão física foi implementada.
+
+### Importar médicos — etapa de pré-visualização, implementada localmente
+
+Administração → Usuários oferece **Importar médicos** a ADMIN e GESTOR, os perfis
+que já podem administrar MEDICO. Esta etapa lê `.xlsx` exclusivamente no navegador:
+seleciona uma unidade ativa da listagem existente (inclusive UPA 24h quando
+cadastrada), encontra a coluna `Nome`, ignora `QTD`, normaliza espaços, omite
+linhas inteiramente vazias e marca nomes repetidos na planilha sem diferenciar
+maiúsculas/minúsculas. Mostra nome, perfil fixo MEDICO, unidade, situação e
+contadores. Não consulta duplicidade no banco, não cria conta/senha/vínculo e
+não envia o conteúdo da planilha à API ou a serviço externo. A prévia é descartada
+ao fechar a janela. Arquivos são limitados a 2 MiB, o ZIP declarado a 16 MiB
+descomprimidos e a aba a 5.000 linhas; a tabela exibe as primeiras 200, com
+contadores de todas. Leitor `read-excel-file` 9.3.12 carregado sob demanda;
+`fflate` 0.8.3 fixado como override compatível com leitor e Cornerstone.
+Validação local: testes de regras/arquivo inválido, Chrome com `.xlsx` sintético,
+typecheck e build. **Sem deploy ou validação com planilha real nesta entrega.**
 
 ## Auditoria existente e confiabilidade
 

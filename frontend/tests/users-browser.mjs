@@ -6,6 +6,14 @@ import { tmpdir } from 'node:os';
 import { join, extname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { strToU8, zipSync } from 'fflate';
+const xlsx = zipSync({
+ '[Content_Types].xml': strToU8('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'),
+ '_rels/.rels': strToU8('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'),
+ 'xl/workbook.xml': strToU8('<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Entrada" sheetId="1" r:id="rId1"/></sheets></workbook>'),
+ 'xl/_rels/workbook.xml.rels': strToU8('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'),
+ 'xl/worksheets/sheet1.xml': strToU8('<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>QTD</t></is></c><c r="B1" t="inlineStr"><is><t>Nome</t></is></c></row><row r="2"><c r="A2"><v>1</v></c><c r="B2" t="inlineStr"><is><t> EXEMPLO   A </t></is></c></row><row r="3"><c r="A3"><v>2</v></c><c r="B3" t="inlineStr"><is><t>exemplo a</t></is></c></row><row r="4"><c r="A4"><v>3</v></c></row></sheetData></worksheet>'),
+ });
 let role='ADMIN',mustChange=false,authenticated=true,expire=false,fail=false;
 const units=[1,2].map(n=>({id:`0000000${n}-0000-4000-8000-000000000001`,name:`Unidade Sintética ${n}`,active:true}));
 let next=3;const users=[],writes=[],reads=[];
@@ -80,7 +88,16 @@ try {
   const set=async(selector,value)=>{await until(()=>evaluate(`!!document.querySelector(${JSON.stringify(selector)})`));await evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(el.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event(el.tagName==='SELECT'?'change':'input',{bubbles:true}));})()`);};
   const ready=()=>until(()=>evaluate(`!document.querySelector('[aria-busy="true"]')&&!document.querySelector('[role="dialog"]')`));
   const open=async()=>{await command('Page.navigate',{url:origin});await click('Usuários');await ready();};
-  await open();await click('Novo médico');
+  await open();await click('Importar médicos');
+  await set('#import-unit',units[0].id);
+  const upload = async (bytes,filename) => evaluate(`(()=>{const input=document.querySelector('#import-file');const transfer=new DataTransfer();transfer.items.add(new File([Uint8Array.from(atob(${JSON.stringify(Buffer.from(bytes).toString('base64'))}),c=>c.charCodeAt(0))],${JSON.stringify(filename)}));Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'files').set.call(input,transfer.files);input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  await upload(xlsx,'synthetic.xlsx');
+  await until(()=>evaluate(`document.body.textContent.includes('Válidos: 1')&&document.body.textContent.includes('Duplicados: 1')&&document.body.textContent.includes('Inválidos: 1')`));
+  assert.equal(await evaluate(`document.querySelector('[role="dialog"]')?.textContent.includes('Unidade Sintética 1')`),true);
+  assert.equal(writes.length,0);
+  await upload(strToU8('inválido'),'synthetic.xlsx');await until(()=>evaluate(`document.querySelector('[role="dialog"] [role="alert"]')?.textContent.includes('inválido')`));
+  await upload(xlsx,'synthetic.xls');await until(()=>evaluate(`document.querySelector('[role="dialog"] [role="alert"]')?.textContent.includes('Selecione um arquivo .xlsx')`));
+  await click('Fechar');await click('Novo médico');
   await set('#user-name','Médico Sintético');await set('#user-username','SYNTHETIC_MEDICO');await set('#user-password','synthetic-initial-password');
   await evaluate(`document.querySelectorAll('[role="dialog"] input[type="checkbox"]').forEach(el=>el.click())`);
   await click('Criar usuário');await until(()=>users.length===1);await ready();assert.equal(users[0].units.length,2);assert.equal(users[0].username,'synthetic_medico');assert.equal(users[0].role,'MEDICO');
@@ -93,7 +110,7 @@ try {
   await set('#users-role','GESTOR');await until(()=>reads.some(q=>q.role==='GESTOR'));await until(()=>evaluate(`document.querySelector('tbody')?.textContent.includes('synthetic_gestor')&&!document.querySelector('tbody')?.textContent.includes('synthetic_medico')`));await set('#users-role','');await ready();
   const screenshot=await command('Page.captureScreenshot',{format:'png'});await writeFile(join(tmpdir(),'pacs-users-synthetic.png'),Buffer.from(screenshot.data,'base64'));
   fail=true;await click('Atualizar');await until(()=>evaluate(`document.body.textContent.includes('Tentar novamente')`));fail=false;await click('Tentar novamente');await until(()=>evaluate(`document.querySelectorAll('tbody tr').length===2`));
-  role='GESTOR';await open();assert.equal(await evaluate(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==='Novo gestor')`),false);assert.equal(await evaluate(`document.querySelector('tbody')?.textContent.includes('synthetic_gestor')`),false);
+  role='GESTOR';await open();assert.equal(await evaluate(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==='Novo gestor')`),false);assert.equal(await evaluate(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==='Importar médicos')`),true);assert.equal(await evaluate(`document.querySelector('tbody')?.textContent.includes('synthetic_gestor')`),false);
   expire=true;await click('Atualizar');await until(()=>evaluate(`document.body.textContent.includes('Sua sessão expirou')`));expire=false;
   role='MEDICO';mustChange=true;const before=reads.filter(r=>r==='studies').length;await command('Page.navigate',{url:origin+'/viewer/00000001-00000001-00000001-00000001-00000001'});await until(()=>evaluate(`document.body.textContent.includes('Troca obrigatória de senha')`));assert.equal(reads.filter(r=>r==='studies').length,before);assert.equal(await evaluate(`!!document.querySelector('nav')`),false);
   await set('#password-current','synthetic-initial-password');await set('#password-new','synthetic-personal-password');await set('#password-confirm','different-synthetic-password');await click('Alterar senha');await until(()=>evaluate(`!!document.querySelector('[role="alert"]')`));assert.equal(writes.filter(w=>w.path==='/api/auth/change-password').length,0);
