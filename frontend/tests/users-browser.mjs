@@ -7,13 +7,16 @@ import { join, extname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { strToU8, zipSync } from 'fflate';
-const xlsx = zipSync({
+const workbook = sheetData => zipSync({
  '[Content_Types].xml': strToU8('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'),
  '_rels/.rels': strToU8('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'),
  'xl/workbook.xml': strToU8('<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Entrada" sheetId="1" r:id="rId1"/></sheets></workbook>'),
  'xl/_rels/workbook.xml.rels': strToU8('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'),
- 'xl/worksheets/sheet1.xml': strToU8('<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>QTD</t></is></c><c r="B1" t="inlineStr"><is><t>Nome</t></is></c></row><row r="2"><c r="A2"><v>1</v></c><c r="B2" t="inlineStr"><is><t> EXEMPLO   A </t></is></c></row><row r="3"><c r="A3"><v>2</v></c><c r="B3" t="inlineStr"><is><t>exemplo a</t></is></c></row><row r="4"><c r="A4"><v>3</v></c></row></sheetData></worksheet>'),
- });
+ 'xl/worksheets/sheet1.xml': strToU8(`<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetData}</sheetData></worksheet>`),
+});
+const xlsx = workbook('<row r="1"><c r="A1" t="inlineStr"><is><t>QTD</t></is></c><c r="B1" t="inlineStr"><is><t>Nome</t></is></c></row><row r="2"><c r="A2"><v>1</v></c><c r="B2" t="inlineStr"><is><t> EXEMPLO   A </t></is></c></row><row r="3"><c r="A3"><v>2</v></c><c r="B3" t="inlineStr"><is><t>exemplo a</t></is></c></row><row r="4"><c r="A4"><v>3</v></c></row>');
+// Somente nomes, sem cabeçalho; "Synthetic Medico" colide com usuário já criado no teste.
+const namesOnly = workbook(['Exemplo Alfa', 'Synthetic Medico', 'exemplo alfa'].map((name, i) => `<row r="${i + 1}"><c r="A${i + 1}" t="inlineStr"><is><t>${name}</t></is></c></row>`).join(''));
 let role='ADMIN',mustChange=false,authenticated=true,expire=false,fail=false;
 const units=[1,2].map(n=>({id:`0000000${n}-0000-4000-8000-000000000001`,name:`Unidade Sintética ${n}`,active:true}));
 let next=3;const users=[],writes=[],reads=[];
@@ -110,6 +113,19 @@ try {
   await set('#users-role','GESTOR');await until(()=>reads.some(q=>q.role==='GESTOR'));await until(()=>evaluate(`document.querySelector('tbody')?.textContent.includes('synthetic_gestor')&&!document.querySelector('tbody')?.textContent.includes('synthetic_medico')`));await set('#users-role','');await ready();
   const screenshot=await command('Page.captureScreenshot',{format:'png'});await writeFile(join(tmpdir(),'pacs-users-synthetic.png'),Buffer.from(screenshot.data,'base64'));
   fail=true;await click('Atualizar');await until(()=>evaluate(`document.body.textContent.includes('Tentar novamente')`));fail=false;await click('Tentar novamente');await until(()=>evaluate(`document.querySelectorAll('tbody tr').length===2`));
+  await click('Importar médicos');await set('#import-unit',units[0].id);await upload(namesOnly,'nomes.xlsx');
+  await until(()=>evaluate(`document.body.textContent.includes('sem cabeçalho')&&document.body.textContent.includes('Válidos: 2')&&document.body.textContent.includes('Duplicados: 1')`));
+  assert.equal(await evaluate(`document.querySelector('[aria-label="Usuário da linha 1"]').value`),'exemplo_alfa');
+  const writesBefore=writes.length;await set('#import-password','synthetic-batch-password');await set('#import-password-confirm','outra-senha-sintetica');await click('Criar 2 médico(s)');
+  await until(()=>evaluate(`document.querySelector('[role="dialog"] [role="alert"]')?.textContent.includes('confirmação')`));assert.equal(writes.length,writesBefore);
+  await set('#import-password-confirm','synthetic-batch-password');await click('Criar 2 médico(s)');
+  await until(()=>evaluate(`document.body.textContent.includes('Usuário já cadastrado; ajuste')`));
+  assert.equal(users.length,3);assert.equal(users[2].username,'exemplo_alfa');assert.equal(users[2].role,'MEDICO');
+  const batch=writes.slice(writesBefore);assert.equal(batch.length,2);assert.ok(batch.every(w=>w.path==='/api/admin/users/medicos'&&w.body.initialPassword==='synthetic-batch-password'&&w.body.validity==='3m'&&w.body.unitIds.length===1&&w.body.unitIds[0]===units[0].id));
+  assert.equal(await evaluate(`document.querySelector('#import-password').value`),'');
+  await set('[aria-label="Usuário da linha 2"]','synthetic_medico2');await set('#import-password','synthetic-batch-password');await set('#import-password-confirm','synthetic-batch-password');await click('Criar 1 médico(s)');
+  await until(()=>users.length===4);assert.equal(users[3].username,'synthetic_medico2');await until(()=>evaluate(`document.body.textContent.includes('Criados: 2')`));
+  await click('Fechar');await ready();await until(()=>evaluate(`document.querySelector('tbody')?.textContent.includes('synthetic_medico2')`));
   role='GESTOR';await open();assert.equal(await evaluate(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==='Novo gestor')`),false);assert.equal(await evaluate(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==='Importar médicos')`),true);assert.equal(await evaluate(`document.querySelector('tbody')?.textContent.includes('synthetic_gestor')`),false);
   expire=true;await click('Atualizar');await until(()=>evaluate(`document.body.textContent.includes('Sua sessão expirou')`));expire=false;
   role='MEDICO';mustChange=true;const before=reads.filter(r=>r==='studies').length;await command('Page.navigate',{url:origin+'/viewer/00000001-00000001-00000001-00000001-00000001'});await until(()=>evaluate(`document.body.textContent.includes('Troca obrigatória de senha')`));assert.equal(reads.filter(r=>r==='studies').length,before);assert.equal(await evaluate(`!!document.querySelector('nav')`),false);
@@ -117,7 +133,7 @@ try {
   await set('#password-confirm','synthetic-personal-password');await click('Alterar senha');await until(()=>evaluate(`!document.body.textContent.includes('Troca obrigatória de senha')`));assert.equal(writes.filter(w=>w.path==='/api/auth/change-password').length,1);
   authenticated=true;mustChange=false;await command('Page.navigate',{url:origin});await until(()=>evaluate(`!!document.querySelector('nav')`));assert.equal(await evaluate(`Array.from(document.querySelectorAll('nav button')).some(b=>b.textContent==='Usuários')`),false);
   assert.equal(failures.length,0,failures.join('\n'));
-  console.log('PASS: Usuários — criação MEDICO/GESTOR, edição, unidades, validade, reset, ativação, filtros, retry, perfis, expiração e troca obrigatória antes do Viewer.');
+  console.log('PASS: Usuários — importação sem cabeçalho com criação em lote, criação MEDICO/GESTOR, edição, unidades, validade, reset, ativação, filtros, retry, perfis, expiração e troca obrigatória antes do Viewer.');
 } finally {
  socket?.close();chrome.kill();await once(chrome,'exit').catch(()=>{});server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:150});
 }

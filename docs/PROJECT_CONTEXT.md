@@ -11,11 +11,12 @@ ou a `.env` real nesta consolidação. Leia antes de qualquer alteração.
 | --- | --- |
 | Auditoria V1 | **VALIDADA EM AMBIENTE REAL**, conforme confirmação posterior do responsável; migration 0004 aplicada |
 | Viewer V5 — exportação | **IMPLEMENTADO NO CÓDIGO**; validação real/deploy específicos de V5 não confirmados nesta sessão |
+| Exportação — sobreposições DICOM nos cantos (modelo do PACS atual) | **IMPLEMENTADA LOCALMENTE** em 29/10/2026; PNG/JPEG/PDF identificados; sem deploy ou validação real |
 | Worklist V2 | **VALIDADA EM AMBIENTE REAL**, com integração Orthanc e ExtendedFind disponível no Orthanc utilizado |
 | Viewer V4 | **VALIDADO COM DICOM REAL**; Invert OFF inicial e após Reset |
 | Administração V1 — Etapa 1: Unidades | **VALIDADA EM AMBIENTE REAL**; migration 0002 aplicada |
 | Administração V1 — Etapa 2: Usuários | **VALIDADA EM AMBIENTE REAL**; backend, frontend, migration 0003 e fluxos implantados/testados com sucesso |
-| Importar médicos — pré-visualização .xlsx | **IMPLEMENTADA LOCALMENTE**; sem criação de usuários, sem deploy ou validação real |
+| Importar médicos — .xlsx com ou sem cabeçalho e criação das contas | **IMPLEMENTADA LOCALMENTE** em 29/10/2026; sem deploy ou validação real |
 
 A Etapa 2 foi validada pelo responsável com **contas fictícias**: login do ADMIN
 existente, listagem, criação de MEDICO, múltiplas unidades, edição, validade,
@@ -349,7 +350,14 @@ Detalhes de contrato, segurança e decisões: [USERS.md](USERS.md).
 - Nenhuma associação por estudo, mudança de papel, recuperação por e-mail,
   criação de ADMIN via UI ou exclusão física foi implementada.
 
-### Importar médicos — etapa de pré-visualização, implementada localmente
+### Importar médicos — implementado localmente
+
+**Etapa 2 (29/10/2026):** aceita também planilha sem cabeçalho, só com uma coluna de
+nomes; sugere username editável (primeiro_último, sem acento, sufixo numérico em
+colisão) e cria as contas MEDICO usando o endpoint existente, uma chamada por linha,
+com unidade, validade e **senha inicial únicas do lote** e troca obrigatória. Até 200
+linhas. Detalhes em [USERS.md](USERS.md). O texto a seguir descreve a etapa 1.
+
 
 Administração → Usuários oferece **Importar médicos** a ADMIN e GESTOR, os perfis
 que já podem administrar MEDICO. Esta etapa lê `.xlsx` exclusivamente no navegador:
@@ -365,6 +373,9 @@ contadores de todas. Leitor `read-excel-file` 9.3.12 carregado sob demanda;
 `fflate` 0.8.3 fixado como override compatível com leitor e Cornerstone.
 Validação local: testes de regras/arquivo inválido, Chrome com `.xlsx` sintético,
 typecheck e build. **Sem deploy ou validação com planilha real nesta entrega.**
+O contrato detalhado, arquivos envolvidos, limites da prévia, comandos/resultados
+dos testes e roteiro de validação manual estão na seção “Importar médicos” de
+[USERS.md](USERS.md).
 
 ## Auditoria existente e confiabilidade
 
@@ -521,6 +532,18 @@ Histórico Git recente conferido: `bbdc7d5` (bind do Compose ao host PACS,
 30/09), `862c668` (Auditoria V1, 29/09), `7a5e1b2` (Usuários, 29/09).
 Esses commits comprovam estado versionado, não execução operacional.
 
+**Script de atualização (29/10/2026, ainda não executado na VM):**
+`scripts/atualizar-pacs-web.sh`, rodado na VM dentro do repositório. Exige branch
+`main` sem alterações locais versionadas; faz `git fetch`, mostra commits, pede
+confirmação, marca a imagem atual como `pacs-web:rollback-<commit>`, aplica
+`git merge --ff-only`, `docker compose build app` e recria **somente** `app`
+(`--no-deps`). Aguarda `/health/ready`; se falhar, volta código e imagem anteriores.
+Recusa migration existente alterada; migration nova só com `--com-migrations`,
+que exige o script de backup, confirmações explícitas e `MIGRATION_DATABASE_URL`
+pedida sem eco, e lembra de reaplicar grants. Após migration aplicada, rollback
+automático não é feito (exige restaurar backup). Mudanças em Compose/Dockerfile
+exigem confirmação mesmo com `--sim`. Testado só em sandbox com Docker simulado.
+
 O responsável informou **reboot controlado validado com sucesso**: mounts NFS
 do storage DICOM e de backup retornaram automaticamente; storage Orthanc e backup
 disponíveis; Orthanc e seu PostgreSQL voltaram; PACS Web e PostgreSQL da aplicação
@@ -554,7 +577,12 @@ foi isolada no frontend Viewer; não alterou exportação, backend, banco ou
 dependências. O comportamento anterior de scroll para imagens em trechos
 históricos de [VIEWER.md](VIEWER.md) não descreve mais o código atual.
 
-### Tarefa posterior separada — NÃO implementar agora
+### Overlays na exportação — IMPLEMENTADO LOCALMENTE em 29/10/2026
+
+Autorizado pelo responsável com imagem de referência do PACS atual. Textos nos quatro
+cantos e réguas em cm, sobrepostos à imagem em PNG/JPEG/PDF identificados; layout e
+tags em [VIEWER_EXPORT.md](VIEWER_EXPORT.md). A validação real do mouse ainda não
+foi confirmada. Registro original da tarefa:
 
 Após validar o mouse, avaliar overlays DICOM **somente na exportação identificada
 derivada**, distribuídos pelas bordas como em imagens radiológicas clínicas.

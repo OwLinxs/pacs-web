@@ -3,10 +3,10 @@ import { init as initLoader, wadouri } from '@cornerstonejs/dicom-image-loader';
 import { utilities as metadata } from '@cornerstonejs/metadata';
 import { createAnnotationSession, createViewerTools, initializeViewerTools, type ViewerTool } from './tools';
 
-import type { ExportSnapshot, ExportMetadata } from './exportModel';
+import type { ExportSnapshot, ExportMetadata, ExportView } from './exportModel';
 import { fitToWindow, readPresentation, type PresentationState } from './presentation';
 
-type NaturalizedImage = Partial<Record<'PatientName'|'PatientID'|'StudyDate'|'Modality'|'StudyDescription'|'InstitutionName'|'SeriesNumber'|'InstanceNumber'|'BurnedInAnnotation', unknown>>;
+type NaturalizedImage = Partial<Record<'PatientName'|'PatientID'|'PatientBirthDate'|'PatientSex'|'PatientAge'|'StudyDate'|'AcquisitionTime'|'ContentTime'|'InstitutionName'|'StationName'|'SeriesNumber'|'ImageLaterality'|'Laterality'|'ViewPosition'|'KVP'|'Exposure'|'ExposureInuAs'|'FilterType'|'PixelSpacing'|'ImagerPixelSpacing'|'PixelSpacingCalibrationType'|'BurnedInAnnotation', unknown>>;
 function naturalValue(value:unknown):string {
  if(Array.isArray(value)) return naturalValue(value[0]);
  if(value && typeof value==='object') {
@@ -17,7 +17,30 @@ function naturalValue(value:unknown):string {
 }
 function exportTags(natural: NaturalizedImage | undefined): Omit<ExportMetadata,'index'|'total'> {
  const value=(tag:keyof NaturalizedImage)=>naturalValue(natural?.[tag]);
- return {patientName:value('PatientName'),patientId:value('PatientID'),studyDate:value('StudyDate'),modality:value('Modality'),studyDescription:value('StudyDescription'),institution:value('InstitutionName'),seriesNumber:value('SeriesNumber'),instanceNumber:value('InstanceNumber'),burnedIn:value('BurnedInAnnotation')};
+ const microAs=Number(value('ExposureInuAs'));
+ const calibration=value('PixelSpacingCalibrationType')||(value('ImagerPixelSpacing')&&!value('PixelSpacing')?'Detector':'');
+ return {patientName:value('PatientName'),patientId:value('PatientID'),patientBirthDate:value('PatientBirthDate'),patientSex:value('PatientSex'),patientAge:value('PatientAge'),
+  studyDate:value('StudyDate'),acquisitionTime:value('AcquisitionTime')||value('ContentTime'),institution:value('InstitutionName'),station:value('StationName'),
+  seriesNumber:value('SeriesNumber'),laterality:value('ImageLaterality')||value('Laterality'),viewPosition:value('ViewPosition'),
+  kvp:value('KVP'),exposure:value('Exposure')||(value('ExposureInuAs')&&Number.isFinite(microAs)?String(microAs/1000):''),filter:value('FilterType'),calibration,burnedIn:value('BurnedInAnnotation')};
+}
+/** W/L, zoom (canvas px por pixel da imagem) e mm por pixel do canvas exportado. */
+function exportView(viewport: StackViewport, canvas: HTMLCanvasElement, calibrated: boolean): ExportView {
+ const voi=viewport.getProperties().voiRange;
+ const view: ExportView={windowWidth:null,windowCenter:null,zoom:null,mmPerPixel:null};
+ if(voi&&Number.isFinite(voi.lower)&&Number.isFinite(voi.upper)){view.windowWidth=voi.upper-voi.lower;view.windowCenter=(voi.upper+voi.lower)/2;}
+ const ratio=canvas.width/(viewport.element.clientWidth||canvas.width);
+ const data=viewport.getImageData();
+ if(data?.imageData){
+  const a=viewport.worldToCanvas(utilities.transformIndexToWorld(data.imageData,[0,0,0])),b=viewport.worldToCanvas(utilities.transformIndexToWorld(data.imageData,[1,0,0]));
+  const zoom=Math.hypot(b[0]-a[0],b[1]-a[1]);if(Number.isFinite(zoom)&&zoom>0)view.zoom=zoom;
+ }
+ if(calibrated){
+  // Coordenadas de mundo do Cornerstone estão em mm quando a imagem é calibrada.
+  const p=viewport.canvasToWorld([0,0]),q=viewport.canvasToWorld([100,0]);
+  const mm=Math.hypot(q[0]-p[0],q[1]-p[1],q[2]-p[2])/100/ratio;if(Number.isFinite(mm)&&mm>0)view.mmPerPixel=mm;
+ }
+ return view;
 }
 
 export const VIEWER_SESSION_EXPIRED = 'pacs-viewer-session-expired';
@@ -242,7 +265,9 @@ export async function createStackViewer(element: HTMLDivElement, lifetime: Abort
       const canvas=document.createElement('canvas');canvas.width=source.width;canvas.height=source.height;
       const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Canvas indisponível.');
       ctx.drawImage(source,0,0);
-      return {canvas,metadata:{...exportTags((cache.getImage(imageId) as {data?: NaturalizedImage} | undefined)?.data ?? (viewport.getCornerstoneImage() as {data?: NaturalizedImage} | undefined)?.data),index:viewport.getCurrentImageIdIndex(),total:imageIds.length},dispose(){canvas.width=0;canvas.height=0;}};
+      const natural=(cache.getImage(imageId) as {data?: NaturalizedImage} | undefined)?.data ?? (viewport.getCornerstoneImage() as {data?: NaturalizedImage} | undefined)?.data;
+      const calibrated=!!(naturalValue(natural?.PixelSpacing)||naturalValue(natural?.ImagerPixelSpacing));
+      return {canvas,metadata:{...exportTags(natural),index:viewport.getCurrentImageIdIndex(),total:imageIds.length},view:exportView(viewport,canvas,calibrated),dispose(){canvas.width=0;canvas.height=0;}};
     },
     setStack(paths, signal) {
       presented = false;
