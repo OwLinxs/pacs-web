@@ -542,7 +542,11 @@ Recusa migration existente alterada; migration nova só com `--com-migrations`,
 que exige o script de backup, confirmações explícitas e `MIGRATION_DATABASE_URL`
 pedida sem eco, e lembra de reaplicar grants. Após migration aplicada, rollback
 automático não é feito (exige restaurar backup). Mudanças em Compose/Dockerfile
-exigem confirmação mesmo com `--sim`. Testado só em sandbox com Docker simulado.
+exigem confirmação mesmo com `--sim`. Ao final sempre recria o container `app`
+(`--force-recreate`). `--reiniciar` reinicia o app mesmo sem versão nova (ex.: após
+editar `.env`); `--reiniciar-tudo` recria também o PostgreSQL do PACS Web. Nunca
+reinicia o serviço Docker da VM, que derrubaria Orthanc/DICOM 4242, legado e NPM.
+Testado só em sandbox com Docker simulado.
 
 O responsável informou **reboot controlado validado com sucesso**: mounts NFS
 do storage DICOM e de backup retornaram automaticamente; storage Orthanc e backup

@@ -3,16 +3,21 @@
 #
 # Fluxo: verificações → git fetch → resumo das mudanças → confirmação →
 # imagem atual marcada para rollback → git merge --ff-only → build do app →
-# (migrations, somente com --com-migrations) → recria SOMENTE o serviço app →
+# (migrations, somente com --com-migrations) → reinicia (recria) o container app →
 # readiness. Se o app novo não ficar pronto, volta código e imagem anteriores.
 #
-# Não toca PostgreSQL, volumes, redes, Orthanc, NPM nem firewall.
+# Reinicia somente containers DESTE projeto Compose (pacs-web). Nunca reinicia o
+# serviço Docker da VM: isso derrubaria Orthanc/DICOM 4242, stack legado e NPM.
+# Não altera volumes, redes, Orthanc, NPM nem firewall.
 # Nunca executa `docker compose config` sem --quiet (imprimiria segredos).
 #
 # Uso (na VM, como usuário com acesso ao Docker):
 #   scripts/atualizar-pacs-web.sh                  # interativo
 #   scripts/atualizar-pacs-web.sh --sim            # sem perguntar (exceto migrations)
 #   scripts/atualizar-pacs-web.sh --com-migrations # janela controlada com migrations
+#   scripts/atualizar-pacs-web.sh --reiniciar      # reinicia o app mesmo sem versão nova
+#                                                  # (ex.: após editar o .env)
+#   scripts/atualizar-pacs-web.sh --reiniciar-tudo # reinicia app + PostgreSQL do PACS Web
 #
 # Variáveis opcionais:
 #   PACS_WEB_DIR     diretório do repositório (padrão: pasta acima deste script)
@@ -30,12 +35,16 @@ REPO="${PACS_WEB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 IMAGE="pacs-web"
 ASSUME_YES=false
 WITH_MIGRATIONS=false
+RESTART=app   # app | all; --reiniciar força reinício mesmo sem versão nova
+FORCE_RESTART=false
 
 for arg in "$@"; do
   case "$arg" in
     --sim|-y) ASSUME_YES=true ;;
     --com-migrations) WITH_MIGRATIONS=true ;;
-    -h|--ajuda|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --reiniciar) FORCE_RESTART=true ;;
+    --reiniciar-tudo) FORCE_RESTART=true; RESTART=all ;;
+    -h|--ajuda|--help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Opção desconhecida: $arg (use --ajuda)" >&2; exit 2 ;;
   esac
 done
@@ -65,13 +74,42 @@ current_branch="$(git rev-parse --abbrev-ref HEAD)"
 # Código não deve ser alterado direto no servidor.
 [[ -z "$(git status --porcelain --untracked-files=no)" ]] || fail "há alterações locais em arquivos versionados; resolva antes (git status)"
 
+wait_ready() {
+  local deadline=$((SECONDS + HEALTH_TIMEOUT))
+  while (( SECONDS < deadline )); do
+    if docker compose exec -T app wget -qO- http://127.0.0.1:8080/health/ready >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 3
+  done
+  return 1
+}
+
+# Recria containers deste projeto para aplicar imagem e .env atuais.
+restart_services() {
+  if [[ "$RESTART" == all ]]; then
+    log "Reiniciando app e PostgreSQL do PACS Web (indisponibilidade breve)…"
+    docker compose up -d --no-build --force-recreate
+  else
+    log "Reiniciando o container app…"
+    docker compose up -d --no-deps --no-build --force-recreate app
+  fi
+}
+
 log "Buscando atualizações de origin/${BRANCH}…"
 git fetch --quiet origin "$BRANCH"
 OLD="$(git rev-parse HEAD)"
 NEW="$(git rev-parse "origin/$BRANCH")"
 if [[ "$OLD" == "$NEW" ]]; then
-  log "Já está na versão mais recente (${OLD:0:7}). Nada a fazer."
-  exit 0
+  log "Já está na versão mais recente (${OLD:0:7})."
+  $FORCE_RESTART || { log "Nada a fazer. Use --reiniciar para reiniciar mesmo assim."; exit 0; }
+  if [[ "$RESTART" == all ]]; then confirm "Reiniciar app e PostgreSQL do PACS Web agora?" || fail "cancelado pelo operador"; fi
+  docker compose config --quiet || fail "docker-compose.yml/.env inválidos"
+  restart_services
+  log "Aguardando readiness (até ${HEALTH_TIMEOUT}s)…"
+  if wait_ready; then log "Reinício concluído: ${OLD:0:7} em execução e pronta."; exit 0; fi
+  docker compose logs --tail=40 app || true
+  fail "app não ficou pronto após reiniciar; verifique .env e logs (docker compose logs app)"
 fi
 git merge-base --is-ancestor "$OLD" "$NEW" || fail "origin/$BRANCH não é fast-forward do HEAD local; intervenção manual necessária"
 
@@ -140,17 +178,6 @@ rollback() {
   fi
 }
 
-wait_ready() {
-  local deadline=$((SECONDS + HEALTH_TIMEOUT))
-  while (( SECONDS < deadline )); do
-    if docker compose exec -T app wget -qO- http://127.0.0.1:8080/health/ready >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 3
-  done
-  return 1
-}
-
 log "Atualizando código (fast-forward)…"
 git merge --quiet --ff-only "$NEW"
 
@@ -181,8 +208,7 @@ if $WITH_MIGRATIONS; then
   confirm "Grants da role runtime reaplicados? Iniciar a nova versão?" sempre || fail "parado após migrations; nova versão NÃO iniciada. Inicie com: docker compose up -d --no-deps --no-build app"
 fi
 
-log "Recriando somente o serviço app…"
-docker compose up -d --no-deps --no-build app
+restart_services
 
 log "Aguardando readiness (até ${HEALTH_TIMEOUT}s)…"
 if wait_ready; then
