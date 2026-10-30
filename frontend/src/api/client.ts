@@ -245,7 +245,21 @@ export type AuditEvent = {id:string; occurredAt:string; event:string; category:s
 export type AuditQuery = {dateFrom?:string; dateTo?:string; actorId?:string; targetUserId?:string; event?:string; category?:string; offset?:number};
 export type AuditPage = {items:AuditEvent[]; limit:number; offset:number; hasMore:boolean; nextOffset:number|null};
 
+export type StatsPeriod = 'day' | 'week' | 'month';
+export type StatsBucket = { label: string; count: number };
+export type StatsResponse = {
+ period: StatsPeriod; from: string; to: string; previousFrom: string; previousTo: string;
+ exams: { total: number; previousTotal: number; truncated: boolean; withoutTime: number; buckets: StatsBucket[]; byHour: number[] } | null;
+ examsError?: string;
+ archive: { studies: number; series: number; instances: number; diskMB: number } | null;
+ usage: { logins: number; loginFailures: number; activeUsers: number; exports: number; previousLogins: number; previousActiveUsers: number; previousExports: number } | null;
+};
+
 export const api = {
+ async getStats(period: StatsPeriod, date: string, signal: AbortSignal): Promise<StatsResponse> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Data inválida.');
+  return requisitar('GET', `/api/stats?period=${period}&date=${date}`, { signal });
+ },
  async recordViewerExport(format:'PNG'|'JPEG'|'PDF',identified:boolean,signal:AbortSignal):Promise<void> {
   return requisitar('POST','/api/viewer/exports',{body:{format,identified},signal});
  },

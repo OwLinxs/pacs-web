@@ -21,7 +21,7 @@ export async function testViewerMouse({ evaluate, command, pause, until }) {
     await command('Input.dispatchMouseEvent', { type:'mouseReleased', ...end, button, buttons:0, clickCount:1 });
     await pause(250);
   };
-  const wheel = async (index, deltaY) => { const p=await point(index,.5,.5); await command('Input.dispatchMouseEvent', { type:'mouseWheel', ...p, deltaX:0, deltaY }); await pause(200); };
+  const wheel = async (index, deltaY, x = .5, y = .5) => { const p=await point(index,x,y); await command('Input.dispatchMouseEvent', { type:'mouseWheel', ...p, deltaX:0, deltaY }); await pause(200); };
   const reset = async () => { await select('Reset'); await pause(150); };
 
   assert.equal(await pressed('Pan'), 'true', 'Pan é a ferramenta inicial do botão esquerdo');
@@ -33,6 +33,8 @@ export async function testViewerMouse({ evaluate, command, pause, until }) {
   const firstImage = await label(0);
   await wheel(0,100); assert.notEqual(await hash(0),original,'roda aplica Zoom');
   assert.equal(await label(0),firstImage,'roda não navega stack');
+  await reset(); await wheel(0,-300); const centered = await hash(0);
+  await reset(); await wheel(0,-300,.2,.2); assert.notEqual(await hash(0),centered,'roda amplia em direção ao cursor, não ao centro');
   await wheel(0,-100); assert.equal(await label(0),firstImage);
   await reset();
   assert.equal(await evaluate(`(() => { const e=document.querySelector('${pane(0)} [data-viewport-uid]'); return !e.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})); })()`),true,'menu de contexto é bloqueado somente no viewport');

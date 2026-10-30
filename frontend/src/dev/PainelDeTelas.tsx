@@ -26,6 +26,7 @@ const ITENS: { grupo: string; itens: Item[] }[] = [
       { id: '2b', label: 'Novo médico (modal)', estado: { screen: 'usuarios', modalNovoMedico: true } },
       { id: '2c', label: 'Auditoria', estado: { screen: 'auditoria' } },
       { id: '2d', label: 'Configurações · PACS', estado: { screen: 'configuracoes' } },
+      { id: '2e', label: 'Estatísticas', estado: { screen: 'estatisticas' } },
     ],
   },
   {

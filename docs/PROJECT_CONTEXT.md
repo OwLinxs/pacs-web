@@ -195,7 +195,9 @@ não toda sua apresentação anterior. Maximização não destrói os outros slo
 
 **Mapeamento de mouse implementado localmente nesta entrega:** esquerdo = Pan
 por padrão (medição selecionada assume temporariamente; novo clique a desativa),
-direito = Window/Level e roda = Zoom, sem navegação do stack. Setas continuam a
+direito = Window/Level e roda = Zoom, sem navegação do stack. **Zoom ancorado no
+cursor (29/10/2026):** a roda amplia/reduz em direção ao ponto sob o mouse, e o
+arraste com a ferramenta Zoom ancora no ponto clicado (`zoomToCenter: false`). Setas continuam a
 navegação. Bindings são limpos/reaplicados por ToolGroup de viewport; o menu de
 contexto é bloqueado só no viewport. Requer validação real controlada antes de
 ser marcado como validado em produção.
@@ -546,6 +548,8 @@ exigem confirmação mesmo com `--sim`. Ao final sempre recria o container `app`
 (`--force-recreate`). `--reiniciar` reinicia o app mesmo sem versão nova (ex.: após
 editar `.env`); `--reiniciar-tudo` recria também o PostgreSQL do PACS Web. Nunca
 reinicia o serviço Docker da VM, que derrubaria Orthanc/DICOM 4242, legado e NPM.
+Registra o commit implantado em `.git/pacs-web-deployed-commit`; após `git pull`
+manual (código à frente da imagem), reconstrói em vez de responder "nada a fazer".
 Testado só em sandbox com Docker simulado.
 
 O responsável informou **reboot controlado validado com sucesso**: mounts NFS
@@ -597,6 +601,57 @@ incluir PHI e mantém a proteção atual contra identificação gravada nos pixe
 A imagem de referência discutida contém dados identificáveis: **não copiá-la ao
 repositório, fixtures ou documentação, nem reproduzir seus dados**. Registra-se
 apenas o padrão visual desejado. Não misturar esta tarefa com a do mouse.
+
+## Pendências da sessão de 29/10/2026 — retomar daqui
+
+Estado ao fim da sessão (máquina pessoal). Ler antes de continuar em outra máquina.
+
+1. **Commit/push pendente** (se ainda não feito): zoom da roda ancorado no cursor
+   (`frontend/src/viewer/tools.ts`, teste em `viewer-mouse-browser.mjs`) e correção
+   do `scripts/atualizar-pacs-web.sh` (reconstrói após `git pull` manual).
+2. **Deploy na VM:** a VM recebeu `git pull` manual, mas a imagem não foi
+   reconstruída; importação/exportação novas não estavam ativas. Após o push:
+   `git pull --ff-only` uma última vez e depois `scripts/atualizar-pacs-web.sh`.
+   Daí em diante usar só o script. Testar login, Worklist, Viewer (zoom no cursor),
+   exportação identificada e importação com planilha **fictícia**.
+3. **PHI no histórico do Git — decisão pendente do responsável:**
+   `docs/ce272326-433a-49af-8d4b-69c7022d55bb.jpeg` (imagem de referência com dados
+   reais de paciente) entrou no commit `75412b8` e foi enviada ao GitHub privado.
+   Opções: `git rm` (sai da versão atual, fica no histórico) ou reescrita do
+   histórico + force push (exige realinhar todos os clones, inclusive a VM). Não
+   reproduzir o conteúdo da imagem em nenhum lugar.
+4. **Senha inicial de lote:** orientação dada — frase de 3 palavras sorteadas + número,
+   sem acento/termos do sistema, diferente a cada importação, entregue individualmente.
+5. **Estatísticas V1 — implementada localmente em 30/10/2026, pendente de commit e
+   validação real.** Ver seção abaixo. V2/V3 continuam ideias não autorizadas.
+
+## Estatísticas V1 — implementada localmente, sem migration
+
+- **Acesso:** menu “Estatísticas” (primeiro item administrativo) e `GET /api/stats`,
+  somente ADMIN e GESTOR (`requireSession` + `requireRole`); MEDICO recebe 403.
+- **Parâmetros:** `period=day|week|month` e `date=YYYY-MM-DD` opcional (padrão: hoje
+  em São Paulo). Semana de segunda a domingo; mês civil. Datas futuras, parâmetros
+  repetidos ou desconhecidos → 400. Comparação sempre contra o período anterior.
+- **Fontes:** exames via Orthanc `/tools/find` (Level Study, filtro `StudyDate`, lê só
+  `StudyDate`/`StudyTime`); acervo via `GET /statistics`; uso (logins, falhas, usuários
+  ativos, exportações) via `audit_events` com limites de dia civil de São Paulo.
+- **Limites:** até `stats.MaxStudies` (10.000) estudos por período; acima disso a
+  resposta marca `truncated` e a tela avisa. Exames sem horário válido entram no total
+  e ficam fora da distribuição por hora. Hora = `StudyTime` gravado pelo equipamento.
+- **Falha parcial:** resposta sempre 200 com agregados; se o Orthanc falhar, `exams`/
+  `archive` vêm nulos com mensagem genérica e uso continua disponível (e vice-versa).
+- **Privacidade:** resposta contém só contagens; nenhum identificador de paciente,
+  estudo ou usuário. Exames não têm vínculo com unidade — não há “exames por unidade”.
+- **Código:** `backend/internal/stats/`, `internal/orthanc/stats.go`,
+  `internal/audit/usage.go`, `internal/httpapi/stats_handler.go`;
+  `frontend/src/screens/EstatisticasScreen.tsx`, `frontend/src/stats/`.
+- **Testes:** `go test ./...` e `-race` (httpapi/stats/orthanc/audit) OK;
+  `usage_postgres_test.go` faz SKIP sem binário `postgres` local — rodar onde houver
+  PostgreSQL. Frontend: `stats-model.test.mjs` e `stats-browser.mjs` (fixtures
+  sintéticas). Validação real: conferir total do dia contra a Worklist e tempo de
+  resposta do período mensal no acervo real.
+- **Desempenho:** sem cache; cada consulta faz até 3 chamadas ao Orthanc em paralelo.
+  Se o mês ficar lento no acervo real, avaliar V2 (`stats_daily` + job diário).
 
 ## Regras permanentes
 

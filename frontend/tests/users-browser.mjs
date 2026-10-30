@@ -87,7 +87,8 @@ try {
 
   let acceptDialog=true;
   socket.addEventListener('message',event=>{const m=JSON.parse(event.data);if(m.method==='Page.javascriptDialogOpening')void command('Page.handleJavaScriptDialog',{accept:acceptDialog});});
-  const click=async label=>{await until(()=>evaluate(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()===${JSON.stringify(label)}&&!b.disabled)`));await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()===${JSON.stringify(label)}).click()`);};
+  // Procura e clica na mesma avaliação: evita corrida com re-render entre as duas etapas.
+  const click=async label=>{await until(()=>evaluate(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()===${JSON.stringify(label)}&&!b.disabled);if(b)b.click();return !!b;})()`));};
   const set=async(selector,value)=>{await until(()=>evaluate(`!!document.querySelector(${JSON.stringify(selector)})`));await evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(el.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event(el.tagName==='SELECT'?'change':'input',{bubbles:true}));})()`);};
   const ready=()=>until(()=>evaluate(`!document.querySelector('[aria-busy="true"]')&&!document.querySelector('[role="dialog"]')`));
   const open=async()=>{await command('Page.navigate',{url:origin});await click('Usuários');await ready();};

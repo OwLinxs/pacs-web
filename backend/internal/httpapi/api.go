@@ -54,6 +54,9 @@ type Deps struct {
 	// Auditoria registra eventos administrativos. Opcional.
 	Auditoria   AuditRecorder
 	AuditReader AuditReader
+	// Estatísticas: agregados do PACS e de uso. Opcionais.
+	Stats StatsSource
+	Usage UsageReader
 	// Now é opcional; o padrão é time.Now.
 	Now func() time.Time
 }
@@ -72,6 +75,8 @@ type Server struct {
 	users       UsersService
 	auditoria   AuditRecorder
 	auditReader AuditReader
+	stats       StatsSource
+	usage       UsageReader
 	now         func() time.Time
 
 	loginLimiter *rateLimiter
@@ -109,6 +114,8 @@ func New(deps Deps) (*Server, error) {
 		users:       deps.Users,
 		auditoria:   deps.Auditoria,
 		auditReader: deps.AuditReader,
+		stats:       deps.Stats,
+		usage:       deps.Usage,
 		now:         agora,
 		loginLimiter: newRateLimiter(
 			deps.Config.LoginRateAttempts,
@@ -163,6 +170,7 @@ func (s *Server) montarRotas() http.Handler {
 		mux.Handle(route, encadear(handler, s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor)))
 	}
 
+	mux.Handle("GET /api/stats", encadear(http.HandlerFunc(s.handleStats), s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor)))
 	mux.Handle("GET /api/admin/audit", encadear(http.HandlerFunc(s.handleAudit), s.requireSession, s.requireRole(user.RoleAdmin)))
 
 	// Rota administrativa mínima, só para comprovar a autorização por perfil.

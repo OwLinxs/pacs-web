@@ -4,6 +4,7 @@ import { useSession } from './auth/SessionProvider';
 import { Toast } from './components/Toast';
 import { studyIDFromRoute, viewerRoute, type Study } from './api/client';
 import { AuditoriaScreen } from './screens/AuditoriaScreen';
+import { EstatisticasScreen } from './screens/EstatisticasScreen';
 import { ConfiguracoesScreen } from './screens/ConfiguracoesScreen';
 import { SessaoExpiradaScreen, IndisponivelScreen } from './screens/EstadoSistemaScreens';
 import { initialWorklist } from './worklist/model';
@@ -146,6 +147,7 @@ export function App() {
         onIndisponivel={() => irPara('indisponivel')}
       >
         {telaDoShell === 'exames' && <ExamesScreen state={worklist} onStateChange={setWorklist} onSessionExpired={expirarSessao} onAbrirExame={abrirExame} />}
+        {telaDoShell === 'estatisticas' && (sessao.user?.role === 'ADMIN' || sessao.user?.role === 'GESTOR') && <EstatisticasScreen onSessionExpired={expirarSessao} />}
         {telaDoShell === 'unidades' && sessao.user?.role === 'ADMIN' && <UnidadesScreen onSessionExpired={expirarSessao} />}
         {telaDoShell === 'usuarios' && (sessao.user?.role === 'ADMIN' || sessao.user?.role === 'GESTOR') && (
           <UsuariosScreen

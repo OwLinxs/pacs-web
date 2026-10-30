@@ -90,6 +90,8 @@ func executarServe(ctx context.Context, log *slog.Logger) error {
 		Users:       useradmin.New(useradmin.NewStore(pool), auth.NewDefaultHasher()),
 		Auditoria:   auditoria,
 		AuditReader: auditoria,
+		Stats:       orthancClient,
+		Usage:       auditoria,
 	})
 	if err != nil {
 		return err

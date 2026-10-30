@@ -20,7 +20,7 @@ export function createViewerTools(element: HTMLDivElement, viewport: StackViewpo
   const groupId = `${engineId}-${viewport.id}-tools`;
   const group = ToolGroupManager.createToolGroup(groupId);
   if (!group) throw new Error('Ferramentas indisponíveis.');
-  for (const tool of toolClasses) group.addTool(tool.toolName, tool === ZoomTool ? { minZoomScale: 0.1, maxZoomScale: 20, zoomToCenter: true } : {});
+  for (const tool of toolClasses) group.addTool(tool.toolName, tool === ZoomTool ? { minZoomScale: 0.1, maxZoomScale: 20, zoomToCenter: false } : {});
   group.addViewport(viewport.id, engineId);
   let selected: ViewerTool = 'Pan';
   let suspended = true;

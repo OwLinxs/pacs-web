@@ -49,6 +49,8 @@ type opcoesCenario struct {
 	viewer          httpapi.ViewerClient
 	units           httpapi.UnitsStore
 	users           func(*authtest.Users, *authtest.Sessions) httpapi.UsersService
+	stats           httpapi.StatsSource
+	usage           httpapi.UsageReader
 	log             *slog.Logger
 }
 
@@ -98,6 +100,8 @@ func montarCenario(t *testing.T, opcoes opcoesCenario) *cenario {
 		Users:       usersService,
 		Auditoria:   auditoria,
 		AuditReader: opcoes.auditReader,
+		Stats:       opcoes.stats,
+		Usage:       opcoes.usage,
 	})
 	if err != nil {
 		t.Fatalf("httpapi.New: %v", err)

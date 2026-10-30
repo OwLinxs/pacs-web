@@ -100,7 +100,20 @@ log "Buscando atualizações de origin/${BRANCH}…"
 git fetch --quiet origin "$BRANCH"
 OLD="$(git rev-parse HEAD)"
 NEW="$(git rev-parse "origin/$BRANCH")"
-if [[ "$OLD" == "$NEW" ]]; then
+# Commit cuja imagem foi implantada por este script; detecta `git pull` manual sem build.
+DEPLOYED_FILE="$REPO/.git/pacs-web-deployed-commit"
+DEPLOYED="$(cat "$DEPLOYED_FILE" 2>/dev/null || true)"
+if [[ "$OLD" == "$NEW" && "$DEPLOYED" != "$OLD" ]]; then
+  if [[ -n "$DEPLOYED" ]] && git cat-file -e "$DEPLOYED^{commit}" 2>/dev/null && git merge-base --is-ancestor "$DEPLOYED" "$OLD"; then
+    log "Código (${OLD:0:7}) está à frente da última implantação (${DEPLOYED:0:7}): a imagem será reconstruída."
+    OLD="$DEPLOYED"
+  else
+    log "Sem registro da última implantação: a imagem será reconstruída a partir de ${OLD:0:7}."
+    log "Migrations pendentes, se houver, fazem o app novo recusar subir e o rollback é automático."
+    FORCE_REBUILD=true
+  fi
+fi
+if [[ "$OLD" == "$NEW" && "${FORCE_REBUILD:-false}" != true ]]; then
   log "Já está na versão mais recente (${OLD:0:7})."
   $FORCE_RESTART || { log "Nada a fazer. Use --reiniciar para reiniciar mesmo assim."; exit 0; }
   if [[ "$RESTART" == all ]]; then confirm "Reiniciar app e PostgreSQL do PACS Web agora?" || fail "cancelado pelo operador"; fi
@@ -212,6 +225,7 @@ restart_services
 
 log "Aguardando readiness (até ${HEALTH_TIMEOUT}s)…"
 if wait_ready; then
+  echo "$NEW" >"$DEPLOYED_FILE"
   log "Atualização concluída: ${NEW:0:7} em execução e pronta."
   log "Conferir manualmente: login, Worklist e abertura de um estudo no Viewer."
   if [[ -n "$ROLLBACK_TAG" ]]; then log "Rollback manual, se necessário: imagem $IMAGE:$ROLLBACK_TAG + git reset --keep ${OLD:0:7}"; fi
