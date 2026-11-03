@@ -13,6 +13,8 @@ func TestParsePeriodAndPrevious(t *testing.T) {
 		{"week", "2026-10-25", "2026-10-19", "2026-10-25", "2026-10-12", "2026-10-18"},
 		{"month", "2026-03-31", "2026-03-01", "2026-03-31", "2026-02-01", "2026-02-28"},
 		{"month", "2026-01-15", "2026-01-01", "2026-01-31", "2025-12-01", "2025-12-31"},
+		{"year", "", "2026-01-01", "2026-12-31", "2025-01-01", "2025-12-31"},
+		{"year", "2024-02-29", "2024-01-01", "2024-12-31", "2023-01-01", "2023-12-31"},
 	}
 	f := func(x time.Time) string { return x.Format("2006-01-02") }
 	for _, c := range cases {
@@ -25,7 +27,7 @@ func TestParsePeriodAndPrevious(t *testing.T) {
 			t.Fatalf("%v: %s..%s / %s..%s", c, f(p.From), f(p.To), f(prev.From), f(prev.To))
 		}
 	}
-	for _, bad := range [][2]string{{"year", ""}, {"day", "2026-10-30"}, {"day", "29/10/2026"}, {"day", "1800-01-01"}} {
+	for _, bad := range [][2]string{{"quarter", ""}, {"day", "2026-10-30"}, {"day", "29/10/2026"}, {"day", "1800-01-01"}} {
 		if _, err := ParsePeriod(bad[0], bad[1], now); err == nil {
 			t.Fatalf("aceitou %v", bad)
 		}
@@ -44,6 +46,24 @@ func TestAggregate(t *testing.T) {
 	day := Period{Kind: "day", From: week.From, To: week.From}
 	e = Aggregate(day, []Moment{{"20261026", "0815"}, {"20261026", "08"}, {"20261026", "x"}})
 	if e.Total != 3 || len(e.Buckets) != 24 || e.Buckets[8].Count != 2 || e.Buckets[8].Label != "08" || e.WithoutTime != 1 {
+		t.Fatalf("dia: %+v", e)
+	}
+}
+
+func TestDaysAndCombine(t *testing.T) {
+	d := func(m time.Month, day int) time.Time { return time.Date(2026, m, day, 0, 0, 0, 0, time.UTC) }
+	days := Days(d(10, 30), d(11, 1), []Moment{{"20261030", "0815"}, {"20261101", "x"}, {"20261029", "1000"}})
+	if len(days) != 3 || days[0].Exams != 1 || days[0].ByHour[8] != 1 || days[1].Exams != 0 || days[2].WithoutTime != 1 {
+		t.Fatalf("dias: %+v", days)
+	}
+	days[2].Truncated = true
+	year := Period{Kind: "year", From: d(1, 1), To: d(12, 31)}
+	e := Combine(year, append(days, Daily{Day: time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC), Exams: 9}))
+	if e.Total != 2 || len(e.Buckets) != 12 || e.Buckets[9].Label != "2026-10" || e.Buckets[9].Count != 1 || e.Buckets[10].Count != 1 || !e.Truncated || e.WithoutTime != 1 {
+		t.Fatalf("ano: %+v", e)
+	}
+	day := Period{Kind: "day", From: d(10, 30), To: d(10, 30)}
+	if e := Combine(day, days); e.Total != 1 || e.Buckets[8].Count != 1 || e.Truncated {
 		t.Fatalf("dia: %+v", e)
 	}
 }

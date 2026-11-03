@@ -79,7 +79,8 @@ app usa a rede própria da aplicação e uma rede Docker externa do PACS para
 alcançar Orthanc; PostgreSQL 18 fica na rede própria, com volume persistente
 separado. O Compose principal não publica PostgreSQL no host. **Estado atual do
 arquivo:** publicação da aplicação no IP específico do host definido em
-`docker-compose.yml`, com porta do host `${APP_PORT:-8080}` e 8080 no container.
+`docker-compose.yml`, IP do host via `${APP_BIND_IP:-192.168.0.173}` (definir no `.env` da VM;
+não editar o compose localmente), porta do host `${APP_PORT:-8080}` e 8080 no container.
 O responsável informa uso operacional da porta **8082**, restrita por firewall
 ao NPM; o valor efetivo de `APP_PORT` e a regra não foram inspecionados aqui.
 O Compose de desenvolvimento publica apenas o banco em loopback.
@@ -151,7 +152,7 @@ Expand, Since/Limit com sentinela; não carrega todo o acervo.
   até quatro chamadas de séries simultâneas. Máximo 2 + limit chamadas upstream
   por página ordenada; 1 + limit em ordem nativa sem modalidade.
 - UI: busca por tipo, filtros avançados, períodos Hoje/Ontem/7/30 dias e
-  personalizado; default últimos sete dias. Datas DICOM sem conversão UTC,
+  personalizado; padrão **Hoje** (alterado em 30/10/2026; antes, últimos 7 dias). Datas DICOM sem conversão UTC,
   ausências/valores inválidos exibidos como travessão, sem descrição inventada.
 - **Preferência final de UI:** removidos controles avulsos Ordenação, Modalidade
   e Por página. Página fixa em 25; clicar no cabeçalho Data/Hora alterna ordem.
@@ -159,7 +160,10 @@ Expand, Since/Limit com sentinela; não carrega todo o acervo.
   instituição é texto DICOM; não há filtro clínico por vínculo à entidade `units`.
 - Estados explícitos: loading, refreshing, error/retry, empty e sessão expirada.
 - Anterior/Próxima com hasMore, sem total fictício; Atualizar mantém filtros e
-  volta à primeira página. Sem polling. Debounce 350 ms, AbortController e
+  volta à primeira página. Atualização automática silenciosa a cada 15 s
+  (Estatísticas: 30 s quando o período inclui hoje), pausada com aba oculta ou
+  após 5 min sem interação, para não manter a sessão viva indefinidamente
+  (`frontend/src/app/useAutoRefresh.ts`). Debounce 350 ms, AbortController e
   proteção contra resultados obsoletos.
 - Estado dos filtros/offset vive em App, somente em memória, preservado ao
   voltar do Viewer; logout/expiração limpam. Query string do fetch ainda pode
@@ -622,8 +626,9 @@ Estado ao fim da sessão (máquina pessoal). Ler antes de continuar em outra má
    reproduzir o conteúdo da imagem em nenhum lugar.
 4. **Senha inicial de lote:** orientação dada — frase de 3 palavras sorteadas + número,
    sem acento/termos do sistema, diferente a cada importação, entregue individualmente.
-5. **Estatísticas V1 — implementada localmente em 30/10/2026, pendente de commit e
-   validação real.** Ver seção abaixo. V2/V3 continuam ideias não autorizadas.
+5. **Estatísticas V1 e V2 — implementadas localmente em 30/10/2026, pendentes de
+   commit e validação real.** Ver seções abaixo. V3 (aberturas no Viewer) e partes
+   do corpo continuam ideias não autorizadas.
 
 ## Estatísticas V1 — implementada localmente, sem migration
 
@@ -650,8 +655,71 @@ Estado ao fim da sessão (máquina pessoal). Ler antes de continuar em outra má
   PostgreSQL. Frontend: `stats-model.test.mjs` e `stats-browser.mjs` (fixtures
   sintéticas). Validação real: conferir total do dia contra a Worklist e tempo de
   resposta do período mensal no acervo real.
-- **Desempenho:** sem cache; cada consulta faz até 3 chamadas ao Orthanc em paralelo.
-  Se o mês ficar lento no acervo real, avaliar V2 (`stats_daily` + job diário).
+- **Desempenho:** ver V2 abaixo; sem dias gravados, o comportamento é o da V1.
+
+## Estatísticas V2 — implementada localmente, migration 0005
+
+- **Migration `0005_stats_daily.sql`:** `stats_daily` (exames por dia civil, sem
+  horário válido, `by_hour[24]`, `truncated`) e `stats_archive_daily` (retrato diário
+  de `/statistics`). Só contagens, recalculáveis do Orthanc. **Após aplicar em
+  produção, conceder à role runtime `SELECT, INSERT, UPDATE` nas duas tabelas**
+  (o script de atualização já pede a confirmação dos grants). Sem os grants, o job
+  registra erro e a tela segue funcionando ao vivo, como na V1.
+- **Job (`internal/statsjob`):** começa 1 min após o start e roda de hora em hora.
+  Em cada execução: grava o retrato do acervo do dia; uma vez por dia recalcula os
+  últimos 7 dias (exames chegam com atraso); preenche dias antigos ainda não
+  calculados, do mais recente para o mais antigo, até 800 dias para trás, no máximo
+  200 dias por execução, em blocos de até 7 dias (se o bloco passar de 10.000
+  estudos, refaz dia a dia). Sem Orthanc configurado, não faz nada. Só lê do PACS.
+- **Handler:** usa os dias gravados e consulta o Orthanc ao vivo apenas para hoje e
+  para sequências de dias ainda não gravadas (até 3 por período; acima disso, uma
+  única consulta). Período passado já gravado aparece mesmo com o PACS fora do ar.
+  Banco indisponível → tudo ao vivo (V1).
+- **Novidades na tela:** período **Ano** (12 meses, comparação com ano anterior);
+  **Crescimento do acervo** (GB no último registro de cada mês, até 12 meses; o
+  histórico começa na implantação, não há como reconstruir o passado); **Acessos
+  por unidade** (logins e usuários ativos pela unidade vinculada; quem tem várias
+  unidades conta em cada uma).
+- **Fora da V2 (decisão do responsável):** modalidade (só há raio-X); partes do
+  corpo/lado e equipamento aguardam levantamento de `BodyPartExamined`,
+  `ProtocolName`, `SeriesDescription` e `StationName` no Orthanc real (comando de
+  contagem agregada fornecido na sessão de 30/10/2026); exportação CSV/PDF.
+- **Testes:** `statsjob` (fakes), handler híbrido (dias gravados, lacunas, ano,
+  fallback), `store_postgres_test.go` e `UnitAccess` no teste PG de uso (SKIP sem
+  `postgres` local — rodar onde houver PostgreSQL antes do deploy).
+
+## LGPD — termo de sigilo, aviso de privacidade e exportação (implementado localmente em 31/10/2026)
+
+Decisão registrada: paciente **não** dá consentimento (base legal do Município é
+LGPD art. 7º, III, e 11, II, "b" e "f"); o termo é ciência/responsabilização dos
+profissionais, não base legal. Textos são **rascunhos** a validar pela Prefeitura.
+
+- **Termo de responsabilidade e sigilo:** migration `0006_terms_acceptance.sql`
+  (`terms_acceptances`: usuário, versão, data; histórico por versão). Texto e versão
+  em `backend/internal/terms/terms.go` (`Version = "2026-10-31-rascunho"`, `Draft`).
+  Trocar o texto **exige trocar `Version`**: todos aceitam de novo.
+- **Bloqueio no servidor:** após a troca obrigatória de senha, `requireSession`
+  devolve 403 `TERMS_REQUIRED` em tudo exceto `GET /api/auth/me`, logout,
+  troca de senha, `GET /api/terms` e `POST /api/terms/accept`. Falha ao consultar o
+  aceite → 503 (fail closed). Aceite verificado fica em cache por sessão (memória,
+  podado na manutenção). `me`/login informam `termsRequired`.
+- **Aceite:** `POST /api/terms/accept {version}` (CSRF); versão diferente da vigente →
+  409; grava aceite + evento `TERMS_ACCEPTED` na mesma transação. Tela `TermoScreen`
+  exige marcar "Li o termo…" antes de "Li e concordo". Nova versão no meio da sessão:
+  o app volta ao termo ao receber `TERMS_REQUIRED`.
+- **Aviso de privacidade:** `frontend/src/legal/privacy.ts` (texto e
+  `ENCARREGADO` com nome/contato **a preencher pela Prefeitura**), aberto pelo link
+  na tela de login e na tela do termo.
+- **Exportação identificada:** aviso reforçado no diálogo (dado de saúde, finalidade
+  assistencial/legal, não enviar por mensageiro/e-mail pessoal, registro em nome do
+  usuário).
+- **Deploy:** aplicar 0006 e conceder à role runtime `SELECT, INSERT` em
+  `terms_acceptances`. No primeiro acesso após o deploy todos verão o termo.
+- **Pendente da Prefeitura:** texto final do termo e do aviso, encarregado, RIPD,
+  registro das operações, plano de incidentes e tabela de temporalidade.
+- **Testes:** `terms_test.go` (gate, aceite, auditoria, cache, fail closed),
+  `policy_test.go`, `terms_postgres_test.go` (SKIP sem `postgres` local),
+  `terms-browser.mjs`.
 
 ## Regras permanentes
 

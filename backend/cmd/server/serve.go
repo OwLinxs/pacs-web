@@ -17,6 +17,9 @@ import (
 	"github.com/pmfb-saude/pacs-web/backend/internal/orthanc"
 	"github.com/pmfb-saude/pacs-web/backend/internal/secrets"
 	"github.com/pmfb-saude/pacs-web/backend/internal/settings"
+	"github.com/pmfb-saude/pacs-web/backend/internal/stats"
+	"github.com/pmfb-saude/pacs-web/backend/internal/statsjob"
+	"github.com/pmfb-saude/pacs-web/backend/internal/terms"
 	"github.com/pmfb-saude/pacs-web/backend/internal/units"
 	"github.com/pmfb-saude/pacs-web/backend/internal/user"
 	"github.com/pmfb-saude/pacs-web/backend/internal/useradmin"
@@ -77,6 +80,7 @@ func executarServe(ctx context.Context, log *slog.Logger) error {
 	}
 
 	orthancClient := orthanc.NewClient()
+	estatisticas := stats.NewStore(pool)
 	api, err := httpapi.New(httpapi.Deps{
 		Config:      cfg,
 		Log:         log,
@@ -92,6 +96,8 @@ func executarServe(ctx context.Context, log *slog.Logger) error {
 		AuditReader: auditoria,
 		Stats:       orthancClient,
 		Usage:       auditoria,
+		StatsStore:  estatisticas,
+		Terms:       terms.NewStore(pool),
 	})
 	if err != nil {
 		return err
@@ -111,6 +117,8 @@ func executarServe(ctx context.Context, log *slog.Logger) error {
 	}
 
 	manutencaoEncerrada := iniciarManutencao(ctx, log, sessoes, api, cfg.SessionIdleTTL)
+	// Resumos diários de estatísticas: só lê do Orthanc e grava contagens.
+	estatisticasEncerradas := statsjob.New(orthancClient, estatisticas, configuracoes, log).Run(ctx)
 
 	erroServidor := make(chan error, 1)
 	go func() {
@@ -146,6 +154,7 @@ func executarServe(ctx context.Context, log *slog.Logger) error {
 		_ = servidor.Close()
 	}
 	<-manutencaoEncerrada
+	<-estatisticasEncerradas
 	log.Info("servidor encerrado")
 	return nil
 }

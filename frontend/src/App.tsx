@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppShell, type AppScreen } from './app/AppShell';
 import { useSession } from './auth/SessionProvider';
 import { Toast } from './components/Toast';
-import { studyIDFromRoute, viewerRoute, type Study } from './api/client';
+import { studyIDFromRoute, viewerRoute, TERMS_REQUIRED_EVENT, type Study } from './api/client';
 import { AuditoriaScreen } from './screens/AuditoriaScreen';
 import { EstatisticasScreen } from './screens/EstatisticasScreen';
 import { ConfiguracoesScreen } from './screens/ConfiguracoesScreen';
@@ -12,6 +12,7 @@ import { ExamesScreen } from './screens/ExamesScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { UnidadesScreen } from './screens/UnidadesScreen';
 import { TrocaSenhaScreen } from './screens/TrocaSenhaScreen';
+import { TermoScreen } from './screens/TermoScreen';
 import { UsuariosScreen } from './screens/UsuariosScreen';
 import { ViewerScreen } from './screens/ViewerScreen';
 import { PainelDeTelas } from './dev/PainelDeTelas';
@@ -57,6 +58,14 @@ export function App() {
       setDemo((atual) => (TELAS_SEM_SESSAO.includes(atual.screen) ? { ...atual, screen: 'exames' } : atual));
     }
   }, [sessao.status]);
+
+  // Termo exigido no meio da sessão (nova versão publicada): recarrega o usuário.
+  const { refresh } = sessao;
+  useEffect(() => {
+    const onTermsRequired = () => { void refresh(); };
+    window.addEventListener(TERMS_REQUIRED_EVENT, onTermsRequired);
+    return () => window.removeEventListener(TERMS_REQUIRED_EVENT, onTermsRequired);
+  }, [refresh]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -121,6 +130,10 @@ export function App() {
 
     if (sessao.user?.mustChangePassword) {
       return <TrocaSenhaScreen onSessionExpired={expirarSessao} onLogout={() => void sair()} onChanged={async () => { await sessao.refresh(); irPara('login'); setToast('Senha alterada. Entre novamente com a nova senha.'); }} />;
+    }
+
+    if (sessao.user?.termsRequired) {
+      return <TermoScreen onSessionExpired={expirarSessao} onLogout={() => void sair()} onAccepted={sessao.refresh} />;
     }
 
     if (demo.screen === 'viewer' && demo.studyId) {

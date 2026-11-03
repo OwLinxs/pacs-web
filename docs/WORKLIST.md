@@ -137,7 +137,7 @@ sem reinterpretar o anterior nem emitir consulta se os filtros não mudaram.
 Filtros de outros campos continuam ativos em AND; um aviso aparece quando estão
 ocultos, e o painel avançado permite revisar todos, incluindo Instituição.
 
-Período inicial: últimos sete dias (hoje e seis anteriores). Atalhos Hoje, Ontem,
+Período inicial: **Hoje** (também ao limpar filtros). Atalhos Hoje, Ontem,
 Últimos 7/30 dias e Personalizado. Datas dos atalhos são resolvidas no calendário
 local ao selecionar e mantidas como datas explícitas durante a navegação; Atualizar
 mantém esse intervalo. Para avançar o intervalo após a virada do dia, selecione o
@@ -169,7 +169,12 @@ registros. Ordenação é global, mas não elimina essa limitação.
 
 Alterar filtro/ordem/tamanho retorna à primeira página. Atualizar mantém critérios
 e tamanho, retorna à primeira página e conserva linhas visíveis desabilitadas
-até concluir. Sem polling/WebSocket. Debounce 350 ms também evita consultas por
+até concluir. Atualização automática silenciosa a cada 15 s (mesma consulta e página, sem
+estado de carregamento nem bloqueio das linhas; falha transitória mantém a página).
+Pausa com a aba oculta e após 5 min sem mouse/teclado — cada requisição renova a
+sessão no servidor, e sem a pausa uma estação esquecida nunca expiraria; a sessão
+expira até ~35 min após a última interação real. Interação ou volta à aba retoma
+e atualiza na hora. Sem WebSocket. Debounce 350 ms também evita consultas por
 cada tecla. Estados: loading, refreshing, vazio, erro/retry e sessão expirada.
 
 Cada effect tem AbortController e cancela timer/requisição ao substituir consulta

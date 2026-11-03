@@ -22,6 +22,7 @@ const (
 	chaveUsuario chaveContexto = iota
 	chaveSessao
 	chaveTokenSessao
+	chaveTermos
 )
 
 // UsuarioDoContexto devolve o usuário autenticado da requisição.
@@ -234,7 +235,23 @@ func (s *Server) requireSession(proximo http.Handler) http.Handler {
 			writeError(w, s.log, 403, "PASSWORD_CHANGE_REQUIRED", "Altere sua senha antes de continuar.")
 			return
 		}
+		// Termo de sigilo: depois da troca obrigatória de senha, antes de qualquer
+		// outra operação. Falha ao consultar bloqueia (fail closed).
+		termsRequired := false
+		if s.terms != nil {
+			accepted, err := s.termsAccepted(r.Context(), sessao.ID, usuario.ID)
+			if err != nil {
+				writeError(w, s.log, http.StatusServiceUnavailable, CodeUnavailable, "Serviço temporariamente indisponível.")
+				return
+			}
+			termsRequired = !accepted
+			if termsRequired && !termsAllowed(r) {
+				writeError(w, s.log, http.StatusForbidden, codeTermsRequired, "Aceite o termo de responsabilidade e sigilo antes de continuar.")
+				return
+			}
+		}
 		ctx := context.WithValue(r.Context(), chaveUsuario, usuario)
+		ctx = context.WithValue(ctx, chaveTermos, termsRequired)
 		ctx = audit.WithActor(ctx, audit.Actor{ID: usuario.ID, Username: usuario.Username, Origin: s.ipDoPedido(r)})
 		ctx = context.WithValue(ctx, chaveSessao, sessao)
 		ctx = context.WithValue(ctx, chaveTokenSessao, token)

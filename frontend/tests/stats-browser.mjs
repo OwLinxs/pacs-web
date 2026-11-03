@@ -12,14 +12,17 @@ const requests = [];
 const days = (from, n) => Array.from({ length: n }, (_, i) => { const d = new Date(`${from}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + i); return d.toISOString().slice(0, 10); });
 function stats(period, date) {
   const week = days('2026-10-26', 7), month = days('2026-10-01', 31);
-  const labels = period === 'day' ? Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0')) : period === 'week' ? week : month;
+  const year = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, '0')}`);
+  const labels = period === 'day' ? Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0')) : period === 'week' ? week : period === 'year' ? year : month;
   const buckets = labels.map((label, i) => ({ label, count: period === 'day' ? (i >= 7 && i <= 22 ? (i * 7) % 11 + 1 : 0) : (i * 13) % 17 + 4 }));
   const total = buckets.reduce((s, b) => s + b.count, 0);
   return {
-    period, from: period === 'day' ? date : labels[0], to: period === 'day' ? date : labels.at(-1), previousFrom: '2026-10-19', previousTo: '2026-10-25',
+    period, from: period === 'day' ? date : period === 'year' ? '2026-01-01' : labels[0], to: period === 'day' ? date : period === 'year' ? '2026-12-31' : labels.at(-1), previousFrom: '2026-10-19', previousTo: '2026-10-25',
     exams: failExams ? null : { total, previousTotal: Math.round(total * 0.9), truncated: false, withoutTime: 2, buckets, byHour: Array.from({ length: 24 }, (_, h) => (h >= 7 && h <= 22 ? (h * 5) % 13 + 2 : 0)) },
     ...(failExams ? { examsError: 'Estatísticas de exames indisponíveis. Verifique a conexão com o PACS.' } : {}),
     archive: failExams ? null : { studies: 48213, series: 61022, instances: 130455, diskMB: 812345 },
+    archiveHistory: Array.from({ length: 12 }, (_, i) => ({ month: i < 2 ? `2025-${11 + i}` : `2026-${String(i - 1).padStart(2, '0')}`, studies: 40000 + i * 700, diskMB: 700000 + i * 10240 })),
+    units: [{ name: 'UPA Sintética', activeUsers: 9, logins: 30 }, { name: 'UBS Sintética', activeUsers: 4, logins: 11 }],
     usage: { logins: 41, loginFailures: 3, activeUsers: 17, exports: 6, previousLogins: 38, previousActiveUsers: 17, previousExports: 0 },
   };
 }
@@ -58,14 +61,16 @@ try {
   await command('Network.enable'); await command('Network.setBlockedURLs', { urls: ['https://*', 'http://fonts.*'] });
   await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
   const text = () => evaluate('document.body.textContent');
-  const click = async (label) => { await until(() => evaluate(`Array.from(document.querySelectorAll('button')).some(b=>(b.textContent.trim()===${JSON.stringify(label)}||b.getAttribute('aria-label')===${JSON.stringify(label)})&&!b.disabled)`)); await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()===${JSON.stringify(label)}||b.getAttribute('aria-label')===${JSON.stringify(label)}).click()`); };
+  // Procura e clica na mesma avaliação: evita corrida com re-render entre as duas etapas.
+  const click = async (label) => { await until(() => evaluate(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(b=>(b.textContent.trim()===${JSON.stringify(label)}||b.getAttribute('aria-label')===${JSON.stringify(label)})&&!b.disabled);if(b)b.click();return !!b;})()`)); };
 
   await command('Page.navigate', { url: origin }); await click('Estatísticas');
   await until(async () => (await text()).includes('Exames por hora'));
   assert.equal(requests.at(-1).period, 'day');
   const t = await text();
-  for (const expected of ['Exames realizados', 'Usuários ativos', '17', 'igual ao dia anterior', '3 falha(s)', 'sem registros no dia anterior', 'Acervo do PACS', '48.213', '793,3 GB', '2 exame(s) sem horário válido']) assert.ok(t.includes(expected), `faltou ${expected}`);
-  assert.equal(await evaluate(`document.querySelectorAll('[role="list"] [role="listitem"]').length`), 24);
+  for (const expected of ['Exames realizados', 'Usuários ativos', '17', 'igual ao dia anterior', '3 falha(s)', 'sem registros no dia anterior', 'Acervo do PACS', '48.213', '793,3 GB', '2 exame(s) sem horário válido', 'Acessos por unidade', 'UPA Sintética', 'Crescimento do acervo', 'Logins']) assert.ok(t.includes(expected), `faltou ${expected}`);
+  assert.equal(await evaluate(`document.querySelectorAll('figure')[0].querySelectorAll('[role="listitem"]').length`), 24);
+  assert.equal(await evaluate(`Array.from(document.querySelectorAll('figure')).find(f=>f.textContent.includes('Crescimento do acervo')).querySelectorAll('[role="listitem"]').length`), 12);
   // Tooltip por hover mostra hora e contagem.
   const bar = await evaluate(`(()=>{const r=document.querySelectorAll('[role="listitem"]')[8].getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height-10};})()`);
   await command('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bar.x, y: bar.y });
@@ -81,6 +86,14 @@ try {
   await click('Mês'); await until(async () => (await text()).includes('outubro de 2026') || (await text()).includes('de 2026'));
   assert.equal(await evaluate(`document.querySelectorAll('figure')[0].querySelectorAll('[role="listitem"]').length`), 31);
   const monthShot = await command('Page.captureScreenshot', { format: 'png' }); await writeFile(join(tmpdir(), 'pacs-stats-month.png'), Buffer.from(monthShot.data, 'base64'));
+  await click('Ano'); await until(async () => (await text()).includes('Exames por mês'));
+  assert.equal(requests.at(-1).period, 'year');
+  assert.equal(await evaluate(`document.querySelectorAll('figure')[0].querySelectorAll('[role="listitem"]').length`), 12);
+  assert.ok((await text()).includes('out') && (await text()).includes('Horário de pico'));
+  const yearShot = await command('Page.captureScreenshot', { format: 'png' }); await writeFile(join(tmpdir(), 'pacs-stats-year.png'), Buffer.from(yearShot.data, 'base64'));
+  await evaluate(`document.querySelector('main')?.scrollTo(0, 1e6); window.scrollTo(0, 1e6); true`); await pause(200);
+  const bottomShot = await command('Page.captureScreenshot', { format: 'png' }); await writeFile(join(tmpdir(), 'pacs-stats-bottom.png'), Buffer.from(bottomShot.data, 'base64'));
+  await click('Mês'); await until(() => requests.at(-1).period === 'month');
   const before = requests.length; await click('Período anterior'); await until(() => requests.length > before);
   assert.ok(requests.at(-1).date < requests[before - 1].date, 'navegou para o período anterior');
   await click('Hoje'); await until(() => requests.at(-1).date === requests[0].date);
@@ -93,7 +106,7 @@ try {
   role = 'MEDICO'; await command('Page.navigate', { url: origin }); await until(() => evaluate(`!!document.querySelector('nav')`));
   assert.equal(await evaluate(`Array.from(document.querySelectorAll('nav button')).some(b=>b.textContent.includes('Estatísticas'))`), false, 'MEDICO não vê o menu');
   assert.equal(failures.length, 0, failures.join('\n'));
-  console.log('PASS: Estatísticas — dia/semana/mês, navegação, tooltip por hover, tabela, falha parcial do PACS, retry e menu por perfil.');
+  console.log('PASS: Estatísticas — dia/semana/mês/ano, acervo, unidades, navegação, tooltip por hover, tabela, falha parcial do PACS, retry e menu por perfil.');
 } finally {
   socket?.close(); chrome.kill(); await once(chrome, 'exit').catch(() => {}); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });
 }

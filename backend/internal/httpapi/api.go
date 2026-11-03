@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pmfb-saude/pacs-web/backend/internal/auth"
@@ -57,6 +58,10 @@ type Deps struct {
 	// Estatísticas: agregados do PACS e de uso. Opcionais.
 	Stats StatsSource
 	Usage UsageReader
+	// StatsStore é opcional: sem ele, todos os dias vêm do PACS ao vivo.
+	StatsStore StatsStore
+	// Terms ativa o termo de sigilo obrigatório. Sem ele, não há bloqueio.
+	Terms TermsStore
 	// Now é opcional; o padrão é time.Now.
 	Now func() time.Time
 }
@@ -77,6 +82,9 @@ type Server struct {
 	auditReader AuditReader
 	stats       StatsSource
 	usage       UsageReader
+	statsStore  StatsStore
+	terms       TermsStore
+	termsOK     sync.Map // sessão (uuid) → momento do aceite verificado
 	now         func() time.Time
 
 	loginLimiter *rateLimiter
@@ -116,6 +124,8 @@ func New(deps Deps) (*Server, error) {
 		auditReader: deps.AuditReader,
 		stats:       deps.Stats,
 		usage:       deps.Usage,
+		statsStore:  deps.StatsStore,
+		terms:       deps.Terms,
 		now:         agora,
 		loginLimiter: newRateLimiter(
 			deps.Config.LoginRateAttempts,
@@ -132,7 +142,10 @@ func New(deps Deps) (*Server, error) {
 func (s *Server) Handler() http.Handler { return s.handler }
 
 // VacuumRateLimiter descarta janelas vencidas do limitador.
-func (s *Server) VacuumRateLimiter() { s.loginLimiter.Vacuum() }
+func (s *Server) VacuumRateLimiter() {
+	s.loginLimiter.Vacuum()
+	s.vacuumTerms(time.Now())
+}
 
 func (s *Server) montarRotas() http.Handler {
 	mux := http.NewServeMux()
@@ -157,6 +170,8 @@ func (s *Server) montarRotas() http.Handler {
 	mux.Handle("POST /api/admin/units", encadear(http.HandlerFunc(s.handleCreateUnit), s.requireSession, s.requireRole(user.RoleAdmin)))
 	mux.Handle("PATCH /api/admin/units/{id}", encadear(http.HandlerFunc(s.handlePatchUnit), s.requireSession, s.requireRole(user.RoleAdmin)))
 
+	mux.Handle("GET /api/terms", encadear(http.HandlerFunc(s.handleGetTerms), s.requireSession))
+	mux.Handle("POST /api/terms/accept", encadear(http.HandlerFunc(s.handleAcceptTerms), s.requireSession))
 	mux.Handle("POST /api/auth/change-password", encadear(http.HandlerFunc(s.handleChangePassword), s.requireSession))
 	mux.Handle("GET /api/admin/users", encadear(http.HandlerFunc(s.handleUsers), s.requireSession, s.requireRole(user.RoleAdmin, user.RoleGestor)))
 	for route, handler := range map[string]http.HandlerFunc{

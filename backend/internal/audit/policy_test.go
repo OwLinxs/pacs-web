@@ -35,8 +35,27 @@ func TestPolicyClosedVocabulary(t *testing.T) {
 			t.Fatal("inventory")
 		}
 	}
-	if len(Events) != 18 {
+	if len(Events) != 19 {
 		t.Fatal("inventory changed")
+	}
+}
+
+func TestTermsAcceptedRequiresActorAndVersionDetail(t *testing.T) {
+	id := uuid.New()
+	for _, e := range []Entry{
+		{Event: EventTermsAccepted, Detail: TermsDetail("2026-10-31-rascunho")},                    // sem ator
+		{Event: EventTermsAccepted, ActorUserID: &id, Detail: "versão=<script>"},                   // detalhe fora do padrão
+		{Event: EventTermsAccepted, ActorUserID: &id, Detail: "versão=" + strings.Repeat("a", 41)}, // longo demais
+		{Event: EventLoginSuccess, ActorUserID: &id, Detail: TermsDetail("2026-10-31-rascunho")},   // detalhe de outro evento
+	} {
+		c := &capture{}
+		if insert(context.Background(), c, e) == nil || c.calls != 0 {
+			t.Fatalf("aceitou %+v", e)
+		}
+	}
+	c := &capture{}
+	if err := insert(context.Background(), c, Entry{Event: EventTermsAccepted, ActorUserID: &id, ActorUsername: "synthetic_medico", Detail: TermsDetail("2026-10-31-rascunho")}); err != nil || c.calls != 1 {
+		t.Fatal("aceite válido recusado", err)
 	}
 }
 func TestAnonymousAttemptAndOriginNeverPersistArbitraryText(t *testing.T) {

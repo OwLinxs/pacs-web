@@ -15,7 +15,7 @@ const MaxStudies = 10000
 
 // Period usa datas civis de São Paulo, inclusivas, representadas em UTC 00:00.
 type Period struct {
-	Kind string    // day | week | month
+	Kind string    // day | week | month | year
 	From time.Time // primeiro dia
 	To   time.Time // último dia, inclusive
 }
@@ -33,7 +33,7 @@ func Today(now time.Time) time.Time {
 	return civil(now.In(loc))
 }
 
-// ParsePeriod: semana de segunda a domingo; mês civil. Datas futuras são recusadas.
+// ParsePeriod: semana de segunda a domingo; mês e ano civis. Datas futuras são recusadas.
 func ParsePeriod(kind, date string, now time.Time) (Period, error) {
 	today := Today(now)
 	ref := today
@@ -53,6 +53,9 @@ func ParsePeriod(kind, date string, now time.Time) (Period, error) {
 	case "month":
 		from := time.Date(ref.Year(), ref.Month(), 1, 0, 0, 0, 0, time.UTC)
 		return Period{Kind: kind, From: from, To: from.AddDate(0, 1, -1)}, nil
+	case "year":
+		from := time.Date(ref.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+		return Period{Kind: kind, From: from, To: from.AddDate(1, 0, -1)}, nil
 	}
 	return Period{}, ErrInvalid
 }
@@ -65,6 +68,9 @@ func (p Period) Previous() Period {
 	case "month":
 		from := p.From.AddDate(0, -1, 0)
 		return Period{Kind: p.Kind, From: from, To: from.AddDate(0, 1, -1)}
+	case "year":
+		from := p.From.AddDate(-1, 0, 0)
+		return Period{Kind: p.Kind, From: from, To: from.AddDate(1, 0, -1)}
 	}
 	return Period{Kind: p.Kind, From: p.From.AddDate(0, 0, -1), To: p.To.AddDate(0, 0, -1)}
 }
@@ -73,7 +79,7 @@ func (p Period) Previous() Period {
 type Moment struct{ Date, Time string }
 
 type Bucket struct {
-	Label string `json:"label"` // YYYY-MM-DD, ou HH no período diário
+	Label string `json:"label"` // HH (dia), YYYY-MM-DD (semana/mês) ou YYYY-MM (ano)
 	Count int    `json:"count"`
 }
 
@@ -94,46 +100,87 @@ func hour(t string) (int, bool) {
 	return h, err == nil && h >= 0 && h <= 23
 }
 
-// Aggregate conta por dia (semana/mês) ou por hora (dia). Estudos fora do
-// período ou com data inválida são ignorados; horários inválidos só não entram
-// na distribuição por hora.
-func Aggregate(p Period, moments []Moment) Exams {
+// Daily é o resumo de um dia civil: base da tabela stats_daily e da agregação.
+type Daily struct {
+	Day         time.Time
+	Exams       int
+	WithoutTime int
+	ByHour      [24]int
+	Truncated   bool
+}
+
+// Days resume os momentos por dia, incluindo dias sem exames, de from a to.
+// Datas fora do intervalo ou inválidas são ignoradas; horários inválidos contam
+// no total e em WithoutTime.
+func Days(from, to time.Time, moments []Moment) []Daily {
+	days := []Daily{}
+	index := map[string]int{}
+	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
+		index[d.Format("20060102")] = len(days)
+		days = append(days, Daily{Day: d})
+	}
+	for _, m := range moments {
+		i, ok := index[m.Date]
+		if !ok {
+			continue
+		}
+		days[i].Exams++
+		if h, ok := hour(m.Time); ok {
+			days[i].ByHour[h]++
+		} else {
+			days[i].WithoutTime++
+		}
+	}
+	return days
+}
+
+// Combine monta as séries do período a partir de resumos diários: por hora
+// (dia), por dia (semana/mês) ou por mês (ano). Dias fora do período são
+// ignorados; dias ausentes contam zero.
+func Combine(p Period, days []Daily) Exams {
 	e := Exams{Buckets: []Bucket{}, ByHour: make([]int, 24)}
 	index := map[string]int{}
-	if p.Kind == "day" {
+	key := func(d time.Time) string { return d.Format("2006-01-02") }
+	switch p.Kind {
+	case "day":
 		for h := 0; h < 24; h++ {
 			e.Buckets = append(e.Buckets, Bucket{Label: strconv.Itoa(100 + h)[1:]})
 		}
-	} else {
+	case "year":
+		key = func(d time.Time) string { return d.Format("2006-01") }
+		for d := p.From; !d.After(p.To); d = d.AddDate(0, 1, 0) {
+			index[key(d)] = len(e.Buckets)
+			e.Buckets = append(e.Buckets, Bucket{Label: key(d)})
+		}
+	default:
 		for d := p.From; !d.After(p.To); d = d.AddDate(0, 0, 1) {
-			index[d.Format("20060102")] = len(e.Buckets)
-			e.Buckets = append(e.Buckets, Bucket{Label: d.Format("2006-01-02")})
+			index[key(d)] = len(e.Buckets)
+			e.Buckets = append(e.Buckets, Bucket{Label: key(d)})
 		}
 	}
-	from, to := p.From.Format("20060102"), p.To.Format("20060102")
-	for _, m := range moments {
-		if len(m.Date) != 8 || m.Date < from || m.Date > to {
+	for _, d := range days {
+		if d.Day.Before(p.From) || d.Day.After(p.To) {
 			continue
 		}
-		if _, err := time.Parse("20060102", m.Date); err != nil {
-			continue
-		}
-		e.Total++
-		h, ok := hour(m.Time)
-		if ok {
-			e.ByHour[h]++
-		} else {
-			e.WithoutTime++
-		}
-		if p.Kind == "day" {
-			if ok {
-				e.Buckets[h].Count++
+		e.Total += d.Exams
+		e.WithoutTime += d.WithoutTime
+		e.Truncated = e.Truncated || d.Truncated
+		for h, n := range d.ByHour {
+			e.ByHour[h] += n
+			if p.Kind == "day" {
+				e.Buckets[h].Count += n
 			}
-		} else {
-			e.Buckets[index[m.Date]].Count++
+		}
+		if p.Kind != "day" {
+			e.Buckets[index[key(d.Day)]].Count += d.Exams
 		}
 	}
 	return e
+}
+
+// Aggregate conta os momentos do período (ver Days e Combine).
+func Aggregate(p Period, moments []Moment) Exams {
+	return Combine(p, Days(p.From, p.To, moments))
 }
 
 // Usage resume eventos de auditoria no período; nada identifica usuários.
@@ -147,10 +194,25 @@ type Usage struct {
 	PreviousExports     int `json:"previousExports"`
 }
 
+// UnitAccess conta logins de usuários vinculados à unidade. Quem pertence a
+// mais de uma unidade conta em cada uma.
+type UnitAccess struct {
+	Name        string `json:"name"`
+	ActiveUsers int    `json:"activeUsers"`
+	Logins      int    `json:"logins"`
+}
+
 // Archive vem de GET /statistics do Orthanc: totais do acervo, não do período.
 type Archive struct {
 	Studies   int64 `json:"studies"`
 	Series    int64 `json:"series"`
 	Instances int64 `json:"instances"`
 	DiskMB    int64 `json:"diskMB"`
+}
+
+// ArchivePoint é o último retrato do acervo registrado no mês.
+type ArchivePoint struct {
+	Month   string `json:"month"` // YYYY-MM
+	Studies int64  `json:"studies"`
+	DiskMB  int64  `json:"diskMB"`
 }

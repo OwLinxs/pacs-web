@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, ApiError, type Study, type StudyPage } from '../api/client';
 import { BlueprintCorners } from '../design-system/Blueprint';
 import { Icon } from '../design-system/Icon';
+import { useAutoRefresh } from '../app/useAutoRefresh';
 import { SEARCH_FIELDS, initialWorklist, periodDates, studyQuery, validateWorklist, dicomDate, dicomTime, modalities, type WorklistState, type SearchField, type Period } from '../worklist/model';
 
 type Props = {
@@ -14,6 +15,8 @@ const PERIODS: { key: Period; label: string }[] = [
   { key: 'today', label: 'Hoje' }, { key: 'yesterday', label: 'Ontem' },
   { key: '7days', label: 'Últimos 7 dias' }, { key: '30days', label: 'Últimos 30 dias' }, { key: 'custom', label: 'Personalizado' },
 ];
+/** Intervalo da atualização automática silenciosa da lista. */
+export const WORKLIST_REFRESH_MS = 15_000;
 const COLUMNS = '110px minmax(140px,1.4fr) 105px 85px minmax(130px,1.4fr) 110px minmax(120px,1fr) 48px';
 
 /** Estado de filtros vive somente na memória de App durante a sessão. */
@@ -50,6 +53,22 @@ export function ExamesScreen({ state, onStateChange, onSessionExpired, onAbrirEx
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [queryKey, revision, validation, refresh, onSessionExpired]);
 
+  // Atualização automática: mesma consulta, sem estado de carregamento nem
+  // bloqueio das linhas; falha transitória mantém a página atual.
+  const poll = useRef<AbortController | null>(null);
+  useEffect(() => () => { poll.current?.abort(); poll.current = null; }, [queryKey, revision]);
+  const { paused } = useAutoRefresh(() => {
+    if (poll.current) return;
+    const controller = new AbortController();
+    poll.current = controller;
+    api.getStudies(JSON.parse(queryKey), controller.signal).then(result => {
+      if (controller.signal.aborted) return;
+      setPage(result); setUpdated(new Date());
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted && cause instanceof ApiError && cause.status === 401) onSessionExpired();
+    }).finally(() => { if (poll.current === controller) poll.current = null; });
+  }, WORKLIST_REFRESH_MS, status === 'ok' && !validation);
+
   const change = (patch: Partial<WorklistState>) => { setRefresh(false); onStateChange({ ...state, ...patch, offset: 0 }); };
   const filter = (key: SearchField | 'institutionName', value: string) => change({ filters: { ...state.filters, [key]: value } });
   const reload = () => { setRefresh(true); onStateChange({ ...state, offset: 0 }); setRevision(value => value + 1); };
@@ -62,6 +81,7 @@ export function ExamesScreen({ state, onStateChange, onSessionExpired, onAbrirEx
         <span role="status" style={{ fontSize: 14, color: 'var(--color-neutral-700)' }}>
           {status === 'loading' ? 'Carregando…' : status === 'refreshing' ? 'Atualizando…' : status === 'ok' ? `${page?.items.length ?? 0} estudo(s) nesta página` : ''}
           {updated && status === 'ok' && ` · atualizado às ${updated.toLocaleTimeString('pt-BR')}`}
+          {status === 'ok' && (paused ? ' · atualização automática pausada por inatividade' : ' · atualização automática')}
         </span>
         <button className="btn btn-secondary" style={{ marginLeft: 'auto' }} disabled={busy || !!validation} onClick={reload}><Icon name="rotate" /> Atualizar</button>
       </div>

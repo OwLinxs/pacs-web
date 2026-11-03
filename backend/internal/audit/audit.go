@@ -39,6 +39,8 @@ const (
 	EventLoginSuccess Event = "LOGIN_SUCCESS"
 	EventLoginFailure Event = "LOGIN_FAILURE"
 	EventLogout       Event = "LOGOUT"
+	// EventTermsAccepted registra a ciência do termo de responsabilidade e sigilo.
+	EventTermsAccepted Event = "TERMS_ACCEPTED"
 
 	// EventOrthancSettingsChanged registra alteração na configuração do PACS.
 	EventOrthancSettingsChanged  Event = "ORTHANC_SETTINGS_CHANGED"

@@ -1,10 +1,15 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, ApiError, type StatsPeriod, type StatsResponse } from '../api/client';
+import { useAutoRefresh } from '../app/useAutoRefresh';
 import { BlueprintCorners } from '../design-system/Blueprint';
 import { ColumnChart } from '../stats/ColumnChart';
 import { bucketLabel, bucketTitle, delta, diskLabel, integer, periodLabel, shiftDate, todaySaoPaulo } from '../stats/model';
 
-const PERIODS: [StatsPeriod, string][] = [['day', 'Dia'], ['week', 'Semana'], ['month', 'Mês']];
+/** Atualização automática quando o período inclui hoje. */
+export const STATS_REFRESH_MS = 30_000;
+const PERIODS: [StatsPeriod, string][] = [['day', 'Dia'], ['week', 'Semana'], ['month', 'Mês'], ['year', 'Ano']];
+const CHART_TITLE: Record<StatsPeriod, string> = { day: 'Exames por hora', week: 'Exames por dia', month: 'Exames por dia', year: 'Exames por mês' };
+const cell = { padding: '6px 16px 6px 0', borderTop: '1px solid var(--color-divider)' } as const;
 
 function Tile({ label, value, note, hero = false }: { label: string; value: string; note?: string; hero?: boolean }) {
   return <div className="blueprint" style={{ position: 'relative', padding: 20, display: 'flex', flexDirection: 'column', gap: 6, background: 'var(--color-bg)' }}>
@@ -41,14 +46,26 @@ export function EstatisticasScreen({ onSessionExpired }: { onSessionExpired: () 
 
   // Mantém o último resultado visível enquanto o próximo carrega, sem misturar períodos.
   const current = data && data.period === period ? data : null;
+  // Atualização silenciosa: sem "Atualizando…"; falha transitória mantém os números.
+  const poll = useRef<AbortController | null>(null);
+  useEffect(() => () => { poll.current?.abort(); poll.current = null; }, [period, date, revision]);
+  const { paused } = useAutoRefresh(() => {
+    if (poll.current) return;
+    const controller = new AbortController();
+    poll.current = controller;
+    api.getStats(period, date, controller.signal).then(value => { if (!controller.signal.aborted) setData(value); }).catch(err => {
+      if (!controller.signal.aborted && err instanceof ApiError && (err.status === 401 || err.code === 'PASSWORD_CHANGE_REQUIRED')) onSessionExpired();
+    }).finally(() => { if (poll.current === controller) poll.current = null; });
+  }, STATS_REFRESH_MS, !loading && !error && !!current && current.to >= today);
   const exams = current?.exams, usage = current?.usage;
   const canAdvance = current ? current.to < today : false;
   const columns = exams ? exams.buckets.map(b => ({ key: b.label, label: bucketLabel(period, b.label), title: bucketTitle(period, b.label), value: b.count })) : [];
+  const growth = (current?.archiveHistory ?? []).map(p => ({ key: p.month, label: bucketLabel('year', p.month), title: bucketTitle('year', p.month), value: Math.round(p.diskMB / 102.4) / 10 }));
   const hours = exams ? exams.byHour.map((value, h) => { const label = String(h).padStart(2, '0'); return { key: label, label: `${label}h`, title: bucketTitle('day', label), value }; }) : [];
   return <section style={{ padding: '32px 40px 48px', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1600, minWidth: 980 }}>
     <header style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
       <h1 style={{ margin: 0, fontSize: 40 }}>Estatísticas</h1>
-      <span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>Contagens agregadas · horário de Brasília</span>
+      <span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>Contagens agregadas · horário de Brasília{current && current.to >= today && !loading && !error && (paused ? ' · atualização automática pausada por inatividade' : ' · atualização automática')}</span>
       <div role="group" aria-label="Período" style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
         {PERIODS.map(([value, label]) => <button key={value} type="button" aria-pressed={period === value} className={`btn ${period === value ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setPeriod(value)}>{label}</button>)}
       </div>
@@ -71,7 +88,7 @@ export function EstatisticasScreen({ onSessionExpired }: { onSessionExpired: () 
       </div>
       {!usage && <p role="alert" style={{ margin: 0 }}>Estatísticas de uso indisponíveis no momento.</p>}
       {exams ? <>
-        <Section><ColumnChart unit="exames" title={period === 'day' ? 'Exames por hora' : 'Exames por dia'} subtitle="Pela data e hora do exame (StudyDate/StudyTime)" columns={columns}/></Section>
+        <Section><ColumnChart unit="exames" title={CHART_TITLE[period]} subtitle="Pela data e hora do exame (StudyDate/StudyTime)" columns={columns}/></Section>
         {period !== 'day' && <Section><ColumnChart unit="exames" title="Horário de pico" subtitle="Exames por hora do dia, somando o período" columns={hours}/></Section>}
         <div style={{ fontSize: 13, color: 'var(--color-neutral-700)', display: 'flex', flexDirection: 'column', gap: 4 }}>
           {exams.withoutTime > 0 && <span>{integer(exams.withoutTime)} exame(s) sem horário válido: contados no total, fora da distribuição por hora.</span>}
@@ -85,6 +102,21 @@ export function EstatisticasScreen({ onSessionExpired }: { onSessionExpired: () 
           {[['Exames', integer(current.archive.studies)], ['Séries', integer(current.archive.series)], ['Imagens', integer(current.archive.instances)], ['Espaço em disco', diskLabel(current.archive.diskMB)]].map(([label, value]) =>
             <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>{label}</span><strong style={{ fontSize: 26, fontWeight: 600 }}>{value}</strong></div>)}
         </div> : <p style={{ marginBottom: 0 }}>Indisponível no momento.</p>}
+        <div style={{ marginTop: 24 }}>
+          {growth.length >= 2
+            ? <ColumnChart unit="GB" title="Crescimento do acervo" subtitle="Espaço em disco no último registro de cada mês (até 12 meses)" columns={growth}/>
+            : <p style={{ margin: 0, fontSize: 13, color: 'var(--color-neutral-700)' }}>O crescimento do acervo é registrado uma vez por dia; o gráfico aparece a partir do segundo mês de registro.</p>}
+        </div>
+      </Section>
+      <Section>
+        <h2 style={{ margin: '0 0 4px', fontSize: 22 }}>Acessos por unidade</h2>
+        <span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>Logins no período, pela unidade vinculada ao usuário. Quem pertence a mais de uma unidade conta em cada uma.</span>
+        {!current.units ? <p style={{ marginBottom: 0 }}>Indisponível no momento.</p>
+          : current.units.length === 0 ? <p style={{ marginBottom: 0 }}>Nenhum login de usuário vinculado a unidade no período.</p>
+          : <table style={{ borderCollapse: 'collapse', fontSize: 14, marginTop: 16, minWidth: 480 }}>
+            <thead><tr><th scope="col" style={{ ...cell, borderTop: 'none', textAlign: 'left' }}>Unidade</th><th scope="col" style={{ ...cell, borderTop: 'none', textAlign: 'right' }}>Usuários ativos</th><th scope="col" style={{ ...cell, borderTop: 'none', textAlign: 'right' }}>Logins</th></tr></thead>
+            <tbody>{current.units.map(u => <tr key={u.name}><td style={cell}>{u.name}</td><td style={{ ...cell, textAlign: 'right' }}>{integer(u.activeUsers)}</td><td style={{ ...cell, textAlign: 'right' }}>{integer(u.logins)}</td></tr>)}</tbody>
+          </table>}
       </Section>
     </>}
   </section>;

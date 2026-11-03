@@ -18,7 +18,7 @@ export function shiftDate(period: StatsPeriod, date: string, step: -1 | 1, today
   const d = parse(date);
   if (period === 'day') d.setUTCDate(d.getUTCDate() + step);
   else if (period === 'week') d.setUTCDate(d.getUTCDate() + 7 * step);
-  else { const day = d.getUTCDate(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + step); const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate(); d.setUTCDate(Math.min(day, last)); }
+  else { const months = period === 'year' ? 12 * step : step; const day = d.getUTCDate(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + months); const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate(); d.setUTCDate(Math.min(day, last)); }
   const result = format(d);
   return result > today ? today : result;
 }
@@ -27,16 +27,18 @@ export function periodLabel(period: StatsPeriod, from: string, to: string): stri
   if (period === 'day') return br(from);
   if (period === 'week') return `${br(from).slice(0, 5)} a ${br(to)}`;
   const d = parse(from);
+  if (period === 'year') return String(d.getUTCFullYear());
   return `${MONTHS[d.getUTCMonth()]} de ${d.getUTCFullYear()}`;
 }
 
-export const previousLabel: Record<StatsPeriod, string> = { day: 'dia anterior', week: 'semana anterior', month: 'mês anterior' };
-const equalTo: Record<StatsPeriod, string> = { day: 'igual ao dia anterior', week: 'igual à semana anterior', month: 'igual ao mês anterior' };
-const noneIn: Record<StatsPeriod, string> = { day: 'sem registros no dia anterior', week: 'sem registros na semana anterior', month: 'sem registros no mês anterior' };
+export const previousLabel: Record<StatsPeriod, string> = { day: 'dia anterior', week: 'semana anterior', month: 'mês anterior', year: 'ano anterior' };
+const equalTo: Record<StatsPeriod, string> = { day: 'igual ao dia anterior', week: 'igual à semana anterior', month: 'igual ao mês anterior', year: 'igual ao ano anterior' };
+const noneIn: Record<StatsPeriod, string> = { day: 'sem registros no dia anterior', week: 'sem registros na semana anterior', month: 'sem registros no mês anterior', year: 'sem registros no ano anterior' };
 
-/** Rótulo curto de barra: hora no dia, "seg 26" na semana, dia do mês no mês. */
+/** Rótulo curto de barra: hora no dia, "seg 26" na semana, dia do mês no mês, "out" no ano. */
 export function bucketLabel(period: StatsPeriod, label: string): string {
   if (period === 'day') return `${label}h`;
+  if (period === 'year') return MONTHS[Number(label.slice(5, 7)) - 1]!.slice(0, 3);
   const d = parse(label);
   return period === 'week' ? `${WEEKDAYS[d.getUTCDay()]} ${String(d.getUTCDate()).padStart(2, '0')}` : String(d.getUTCDate());
 }
@@ -44,6 +46,7 @@ export function bucketLabel(period: StatsPeriod, label: string): string {
 /** Rótulo completo para tooltip e tabela. */
 export function bucketTitle(period: StatsPeriod, label: string): string {
   if (period === 'day') return `${label}:00–${label}:59`;
+  if (period === 'year') return `${MONTHS[Number(label.slice(5, 7)) - 1]} de ${label.slice(0, 4)}`;
   const d = parse(label);
   return `${WEEKDAYS[d.getUTCDay()]}, ${br(label)}`;
 }

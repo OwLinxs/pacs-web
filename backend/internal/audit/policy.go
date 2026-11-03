@@ -16,7 +16,7 @@ var Events = []Event{
 	EventUserCreated, EventUserUpdated, EventUserActivated, EventUserDeactivated,
 	EventUserAccessRenewed, EventUserPasswordReset, EventUserPasswordChanged, EventUserUnitsChanged,
 	EventUnitCreated, EventUnitUpdated, EventUnitActivated, EventUnitDeactivated,
-	EventLoginSuccess, EventLoginFailure, EventLogout, EventOrthancSettingsChanged, EventOrthancConnectionTested,
+	EventLoginSuccess, EventLoginFailure, EventLogout, EventTermsAccepted, EventOrthancSettingsChanged, EventOrthancConnectionTested,
 }
 
 func Known(e Event) bool {
@@ -37,7 +37,7 @@ func Category(e Event) string {
 		return "units"
 	case e == EventOrthancSettingsChanged || e == EventOrthancConnectionTested:
 		return "settings"
-	case e == EventLoginSuccess || e == EventLoginFailure || e == EventLogout:
+	case e == EventLoginSuccess || e == EventLoginFailure || e == EventLogout || e == EventTermsAccepted:
 		return "auth"
 	default:
 		return "unknown"
@@ -45,6 +45,10 @@ func Category(e Event) string {
 }
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,63}$`)
+var termsDetailPattern = regexp.MustCompile(`^versão=[0-9a-z.-]{1,40}$`)
+
+// TermsDetail é o único detalhe aceito em TERMS_ACCEPTED.
+func TermsDetail(version string) string { return "versão=" + version }
 
 func SafeDetail(e Event, detail string) string {
 	switch Category(e) {
@@ -68,6 +72,9 @@ func SafeDetail(e Event, detail string) string {
 			}
 		}
 	case "auth":
+		if e == EventTermsAccepted && termsDetailPattern.MatchString(detail) {
+			return detail
+		}
 		allowed := map[Event][]string{EventLoginSuccess: {"sessão iniciada"}, EventLogout: {"encerrada pelo usuário"}, EventLoginFailure: {"usuário inexistente", "senha incorreta", "conta desativada", "validade de acesso expirada"}}
 		for _, value := range allowed[e] {
 			if detail == value {
@@ -127,7 +134,7 @@ func insert(ctx context.Context, db executor, e Entry) error {
 	if !Known(e.Event) {
 		return ErrInvalid
 	}
-	if (Category(e.Event) == "users" || Category(e.Event) == "units" || e.Event == EventOrthancSettingsChanged || e.Event == EventViewerImageExported) && (e.ActorUserID == nil || *e.ActorUserID == uuid.Nil) {
+	if (Category(e.Event) == "users" || Category(e.Event) == "units" || e.Event == EventOrthancSettingsChanged || e.Event == EventViewerImageExported || e.Event == EventTermsAccepted) && (e.ActorUserID == nil || *e.ActorUserID == uuid.Nil) {
 		return ErrInvalid
 	}
 	if Category(e.Event) == "units" && (e.UnitID == nil || *e.UnitID == uuid.Nil) {

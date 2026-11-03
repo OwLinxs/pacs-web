@@ -53,7 +53,7 @@ não são devolvidos. Não se altera retroativamente o banco.
 | --- | --- |
 | Unidades | UNIT_CREATED, UNIT_UPDATED, UNIT_ACTIVATED, UNIT_DEACTIVATED |
 | Usuários | USER_CREATED, USER_UPDATED, USER_ACTIVATED, USER_DEACTIVATED, USER_ACCESS_RENEWED, USER_PASSWORD_RESET, USER_PASSWORD_CHANGED, USER_UNITS_CHANGED |
-| Autenticação | LOGIN_SUCCESS, LOGIN_FAILURE, LOGOUT |
+| Autenticação | LOGIN_SUCCESS, LOGIN_FAILURE, LOGOUT, TERMS_ACCEPTED (detalhe único `versão=<versão do termo>`, exige ator) |
 | Configuração | ORTHANC_SETTINGS_CHANGED, ORTHANC_CONNECTION_TESTED |
 
 Categorias são derivadas no código, sem alterar valores persistidos. Labels

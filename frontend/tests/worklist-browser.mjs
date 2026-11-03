@@ -80,6 +80,10 @@ try {
   const set=async(label,value)=>{await evaluate(`(()=>{const el=document.querySelector('[aria-label="${label}"]');Object.getOwnPropertyDescriptor(el.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event(el.tagName==='SELECT'?'change':'input',{bubbles:true}));})()`);};
   const queried=async(fn)=>{await until(()=>fn(requests.at(-1)));await ready();};
   const body=()=>evaluate('document.body.textContent');
+  // Ao entrar, abre direto em "Hoje".
+  const hoje=await evaluate(`(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')})()`);
+  assert.equal(requests[0].dateFrom,hoje);assert.equal(requests[0].dateTo,hoje);
+  assert.equal(await evaluate(`Array.from(document.querySelectorAll('button[aria-pressed="true"]')).map(b=>b.textContent.trim()).join()`),'Hoje');
   assert.equal(requests[0].sort,'dateDesc');assert.equal(requests[0].limit,'25');assert.equal(requests[0].offset,'0');
   assert.ok((await body()).includes('28/09/2026'));assert.ok((await body()).includes('14:32'));assert.ok((await body()).includes('CT / SR'));
   assert.equal(await evaluate(`Array.from(document.querySelector('[aria-label="Abrir estudo"]').children).filter(e=>e.textContent==="—").length`),4,"tags ausentes neutras");
@@ -134,12 +138,23 @@ try {
   await evaluate(`history.pushState(null,'','/viewer/${id(1)}');window.dispatchEvent(new PopStateEvent('popstate'))`);
   await until(()=>disconnected>beforeUnmount);await pause(1100);assert.ok(await evaluate('location.pathname.startsWith("/viewer/")'));
   await evaluate(`history.pushState(null,'','/');window.dispatchEvent(new PopStateEvent('popstate'))`);await ready();
+  // Atualização automática silenciosa: mesma consulta, linhas continuam clicáveis.
+  const beforePoll=requests.length,pollQuery=JSON.stringify(requests.at(-1));
+  await until(()=>requests.length>beforePoll,20000);assert.equal(JSON.stringify(requests.at(-1)),pollQuery);
+  assert.equal(await evaluate(`document.querySelector('[aria-label="Abrir estudo"]').getAttribute('aria-disabled')`),'false');
+  assert.ok((await body()).includes('atualização automática'));
+  // Sem interação por 5 min pausa (a sessão não fica viva indefinidamente); interação retoma na hora.
+  await evaluate(`(()=>{const real=Date.now.bind(Date);Date.now=()=>real()+6*60000;return true;})()`);
+  await until(async()=>(await body()).includes('pausada por inatividade'),20000);
+  const pausedAt=requests.length;await pause(500);assert.equal(requests.length,pausedAt);
+  await evaluate(`window.dispatchEvent(new Event('pointermove'))`);
+  await until(()=>requests.length>pausedAt);await until(async()=>!(await body()).includes('pausada por inatividade'));
   const shot=await command('Page.captureScreenshot',{format:'png'});await writeFile(join(tmpdir(),'pacs-worklist-synthetic.png'),Buffer.from(shot.data,'base64'));
   mode='expired';await click('Atualizar');await until(()=>evaluate('document.body.textContent.toLowerCase().includes("sessão expirou")'));
   const stopped=requests.length;await pause(800);assert.equal(requests.length,stopped,'sem polling após expiração');
   assert.equal(failures.length,0,failures.join('\n'));assert.ok(network.filter(url=>url.startsWith('http')).every(url=>url.startsWith(origin)||url.includes('fonts.')));
 
-  console.log('PASS: Worklist V2 — busca, AND, períodos, validação, ordenação no cabeçalho, paginação, refresh, navegação, tags ausentes, concorrência, unmount e sessão.');
+  console.log('PASS: Worklist V2 — busca, AND, períodos (padrão Hoje), atualização automática e pausa por inatividade, validação, ordenação no cabeçalho, paginação, refresh, navegação, tags ausentes, concorrência, unmount e sessão.');
 } finally {
- socket?.close();chrome.kill();await once(chrome,'exit').catch(()=>{});server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(profile,{recursive:true,force:true});
+ socket?.close();chrome.kill();await once(chrome,'exit').catch(()=>{});server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:150});
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,10 +19,15 @@ type fakeStats struct {
 	calls   atomic.Int32
 	fail    error
 	moments []stats.Moment
+	mu      sync.Mutex
+	ranges  []string
 }
 
 func (f *fakeStats) StudyMoments(_ context.Context, _ orthanc.Config, from, to time.Time) ([]stats.Moment, bool, error) {
 	f.calls.Add(1)
+	f.mu.Lock()
+	f.ranges = append(f.ranges, from.Format("2006-01-02")+".."+to.Format("2006-01-02"))
+	f.mu.Unlock()
 	return f.moments, false, f.fail
 }
 func (f *fakeStats) ArchiveStatistics(context.Context, orthanc.Config) (stats.Archive, error) {
@@ -32,6 +38,27 @@ type usageFunc func(stats.Period, stats.Period) (stats.Usage, error)
 
 func (f usageFunc) Usage(_ context.Context, cur, prev stats.Period) (stats.Usage, error) {
 	return f(cur, prev)
+}
+func (f usageFunc) UnitAccess(context.Context, stats.Period) ([]stats.UnitAccess, error) {
+	return []stats.UnitAccess{{Name: "UPA Sintética", ActiveUsers: 2, Logins: 5}}, nil
+}
+
+type fakeStore struct {
+	days []stats.Daily
+	fail error
+}
+
+func (f *fakeStore) Days(_ context.Context, from, to time.Time) ([]stats.Daily, error) {
+	out := []stats.Daily{}
+	for _, d := range f.days {
+		if !d.Day.Before(from) && !d.Day.After(to) {
+			out = append(out, d)
+		}
+	}
+	return out, f.fail
+}
+func (f *fakeStore) ArchiveHistory(context.Context, time.Time, time.Time) ([]stats.ArchivePoint, error) {
+	return []stats.ArchivePoint{{Month: "2026-09", Studies: 5, DiskMB: 100}, {Month: "2026-10", Studies: 7, DiskMB: 150}}, f.fail
 }
 
 func TestStatsAuthorizationAndPeriods(t *testing.T) {
@@ -58,7 +85,7 @@ func TestStatsAuthorizationAndPeriods(t *testing.T) {
 	}
 	c := montarCenario(t, opcoesCenario{stats: &fakeStats{}})
 	loginStudies(t, c, user.RoleAdmin)
-	for _, query := range []string{"period=year", "period=day&date=2026-13-01", "period=day&date=2999-01-01", "period=day&period=week", "periodo=day"} {
+	for _, query := range []string{"period=quarter", "period=day&date=2026-13-01", "period=day&date=2999-01-01", "period=day&period=week", "periodo=day"} {
 		r := c.requisitar(t, "GET", "/api/stats?"+query, nil)
 		r.Body.Close()
 		if r.StatusCode != 400 {
@@ -119,4 +146,82 @@ func TestStatsAggregatesAndPartialFailure(t *testing.T) {
 	if r.StatusCode != 200 || json.Unmarshal(raw, &partial) != nil || partial.Exams != nil || partial.Archive != nil || partial.Usage == nil || partial.ExamsError == "" {
 		t.Fatalf("falha parcial incorreta: %d %s", r.StatusCode, raw)
 	}
+}
+
+func TestStatsUsesStoredDaysAndOnlyFetchesGaps(t *testing.T) {
+	// 30/10/2026 12:00 em São Paulo.
+	now := func() time.Time { return time.Date(2026, 10, 30, 15, 0, 0, 0, time.UTC) }
+	d := func(m time.Month, day int) time.Time { return time.Date(2026, m, day, 0, 0, 0, 0, time.UTC) }
+	store := &fakeStore{}
+	for day := d(10, 1); day.Before(d(10, 30)); day = day.AddDate(0, 0, 1) {
+		daily := stats.Daily{Day: day, Exams: 2}
+		daily.ByHour[9] = 2
+		store.days = append(store.days, daily)
+	}
+	source := &fakeStats{moments: []stats.Moment{{Date: "20261030", Time: "1000"}}}
+	usage := usageFunc(func(stats.Period, stats.Period) (stats.Usage, error) { return stats.Usage{}, nil })
+	c := montarCenario(t, opcoesCenario{stats: source, usage: usage, statsStore: store, now: now})
+	seedStudiesSettings(t, c)
+	loginStudies(t, c, user.RoleAdmin)
+
+	get := func(query string) (map[string]json.RawMessage, *stats.Exams) {
+		t.Helper()
+		r := c.requisitar(t, "GET", "/api/stats?"+query, nil)
+		raw, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		var body map[string]json.RawMessage
+		var exams *stats.Exams
+		if r.StatusCode != 200 || json.Unmarshal(raw, &body) != nil || json.Unmarshal(body["exams"], &exams) != nil {
+			t.Fatalf("%s: %d %s", query, r.StatusCode, raw)
+		}
+		return body, exams
+	}
+
+	// Mês corrente: 1–29/10 gravados (+ setembro ausente), só hoje e o mês anterior vêm do PACS.
+	body, exams := get("period=month")
+	if exams == nil || exams.Total != 29*2+1 || exams.Buckets[29].Count != 1 || exams.ByHour[9] != 58 || exams.PreviousTotal != 0 {
+		t.Fatalf("mês: %+v", exams)
+	}
+	source.mu.Lock()
+	ranges := append([]string(nil), source.ranges...)
+	source.ranges = nil
+	source.mu.Unlock()
+	if len(ranges) != 2 || !contains(ranges, "2026-10-30..2026-10-30") || !contains(ranges, "2026-09-01..2026-09-30") {
+		t.Fatalf("intervalos ao vivo: %v", ranges)
+	}
+	if !strings.Contains(string(body["units"]), "UPA Sintética") || !strings.Contains(string(body["archiveHistory"]), "2026-10") {
+		t.Fatalf("unidades/acervo ausentes: %s %s", body["units"], body["archiveHistory"])
+	}
+
+	// Semana passada inteira gravada: PACS fora do ar não impede os exames.
+	source.fail = orthanc.Unavailable
+	_, exams = get("period=week&date=2026-10-20")
+	if exams == nil || exams.Total != 14 || exams.PreviousTotal != 14 {
+		t.Fatalf("semana gravada: %+v", exams)
+	}
+	source.fail = nil
+
+	// Ano: 12 meses; banco indisponível cai para o PACS ao vivo no ano inteiro.
+	_, exams = get("period=year")
+	source.mu.Lock()
+	ranges = source.ranges
+	source.mu.Unlock()
+	if exams == nil || len(exams.Buckets) != 12 || exams.Buckets[9].Count != 59 || !contains(ranges, "2026-01-01..2026-09-30") || !contains(ranges, "2026-10-30..2026-10-30") {
+		t.Fatalf("ano: %+v", exams)
+	}
+	store.fail = stats.ErrStore
+	source.ranges = nil // sem concorrência: a requisição anterior já terminou
+	body, exams = get("period=year")
+	if exams == nil || len(source.ranges) != 2 || !contains(source.ranges, "2026-01-01..2026-10-30") || string(body["archiveHistory"]) != "null" {
+		t.Fatalf("fallback: %v %s", source.ranges, body["archiveHistory"])
+	}
+}
+
+func contains(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }

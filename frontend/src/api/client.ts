@@ -17,6 +17,8 @@ export type SessionUser = {
   email?: string;
   role: Role;
   mustChangePassword: boolean;
+  /** Termo de responsabilidade e sigilo pendente para a versão vigente. */
+  termsRequired?: boolean;
   units: { id: string; name: string; active: boolean }[];
   unit: { id: string; name: string } | null;
   active: boolean;
@@ -93,6 +95,9 @@ async function requisitar<T>(metodo: Metodo, caminho: string, opcoes: OpcoesRequ
   if (resposta.ok) return corpo as T;
 
   const erro = extrairErro(resposta.status, corpo);
+
+  // Nova versão do termo durante a sessão: App volta para a tela de aceite.
+  if (erro.code === 'TERMS_REQUIRED') window.dispatchEvent(new Event(TERMS_REQUIRED_EVENT));
 
   // Token de CSRF vencido (por exemplo após reiniciar o backend): renova e
   // repete uma única vez.
@@ -245,13 +250,18 @@ export type AuditEvent = {id:string; occurredAt:string; event:string; category:s
 export type AuditQuery = {dateFrom?:string; dateTo?:string; actorId?:string; targetUserId?:string; event?:string; category?:string; offset?:number};
 export type AuditPage = {items:AuditEvent[]; limit:number; offset:number; hasMore:boolean; nextOffset:number|null};
 
-export type StatsPeriod = 'day' | 'week' | 'month';
+export const TERMS_REQUIRED_EVENT = 'pacs:terms-required';
+export type TermsDocument = { version: string; title: string; draft: boolean; sections: { heading: string; paragraphs: string[] }[] };
+
+export type StatsPeriod = 'day' | 'week' | 'month' | 'year';
 export type StatsBucket = { label: string; count: number };
 export type StatsResponse = {
  period: StatsPeriod; from: string; to: string; previousFrom: string; previousTo: string;
  exams: { total: number; previousTotal: number; truncated: boolean; withoutTime: number; buckets: StatsBucket[]; byHour: number[] } | null;
  examsError?: string;
  archive: { studies: number; series: number; instances: number; diskMB: number } | null;
+ archiveHistory: { month: string; studies: number; diskMB: number }[] | null;
+ units: { name: string; activeUsers: number; logins: number }[] | null;
  usage: { logins: number; loginFailures: number; activeUsers: number; exports: number; previousLogins: number; previousActiveUsers: number; previousExports: number } | null;
 };
 
@@ -286,6 +296,11 @@ export const api = {
  async setUserActive(id:string,active:boolean,signal:AbortSignal):Promise<ManagedUser> { return requisitar('POST',`/api/admin/users/${administrativeID(id)}/active`,{body:{active},signal}); },
  async renewUser(id:string,validity:Validity,signal:AbortSignal):Promise<ManagedUser> { return requisitar('POST',`/api/admin/users/${administrativeID(id)}/renew`,{body:{validity},signal}); },
  async resetUserPassword(id:string,initialPassword:string,signal:AbortSignal):Promise<ManagedUser> { return requisitar('POST',`/api/admin/users/${administrativeID(id)}/reset-password`,{body:{initialPassword},signal}); },
+ async getTerms(signal:AbortSignal):Promise<TermsDocument> { return requisitar('GET','/api/terms',{signal}); },
+ async acceptTerms(version:string,signal:AbortSignal):Promise<void> {
+  if(!/^[0-9a-z.-]{1,40}$/.test(version))throw new Error('Versão do termo inválida.');
+  return requisitar('POST','/api/terms/accept',{body:{version},signal});
+ },
  async changePassword(currentPassword:string,newPassword:string,signal:AbortSignal):Promise<void> { return requisitar('POST','/api/auth/change-password',{body:{currentPassword,newPassword},signal}); },
   async getUnits(includeInactive: boolean, offset: number, signal: AbortSignal): Promise<UnitsPage> {
     return requisitar('GET', `/api/units?includeInactive=${includeInactive}&limit=50&offset=${offset}`, { signal });

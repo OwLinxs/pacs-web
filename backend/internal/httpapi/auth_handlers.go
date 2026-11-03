@@ -34,6 +34,7 @@ type unitResponse struct {
 // password_hash não tem representação aqui.
 type userResponse struct {
 	MustChangePassword bool           `json:"mustChangePassword"`
+	TermsRequired      bool           `json:"termsRequired"`
 	Units              []user.UnitRef `json:"units"`
 	ID                 string         `json:"id"`
 	Name               string         `json:"name"`
@@ -153,7 +154,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.setCSRFCookie(w, token)
 	}
 
-	writeJSON(w, s.log, http.StatusOK, sessionResponse{User: paraUserResponse(resultado.User)})
+	resposta := paraUserResponse(resultado.User)
+	if s.terms != nil {
+		// Erro na consulta mostra o termo; o middleware decide de novo a cada requisição.
+		accepted, err := s.termsAccepted(r.Context(), resultado.Session.ID, resultado.User.ID)
+		resposta.TermsRequired = err != nil || !accepted
+	}
+	writeJSON(w, s.log, http.StatusOK, sessionResponse{User: resposta})
 }
 
 // handleMe devolve o usuário da sessão atual.
@@ -163,7 +170,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, s.log, http.StatusUnauthorized, CodeUnauthenticated, "Sessão inválida ou expirada.")
 		return
 	}
-	writeJSON(w, s.log, http.StatusOK, sessionResponse{User: paraUserResponse(usuario)})
+	resposta := paraUserResponse(usuario)
+	resposta.TermsRequired = termsRequiredFromContext(r.Context())
+	writeJSON(w, s.log, http.StatusOK, sessionResponse{User: resposta})
 }
 
 // handleLogout encerra a sessão no servidor e limpa o cookie.

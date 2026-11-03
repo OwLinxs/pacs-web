@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ApiError } from '../api/client';
 import { BlueprintCorners } from '../design-system/Blueprint';
 import { Icon } from '../design-system/Icon';
+import { PrivacyDialog } from '../legal/PrivacyDialog';
 
 type LoginScreenProps = {
   /** Autentica no backend. Deve lançar ApiError quando a entrada é recusada. */
@@ -20,6 +21,7 @@ export function LoginScreen({ onSubmit }: LoginScreenProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [privacy, setPrivacy] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -220,10 +222,15 @@ export function LoginScreen({ onSubmit }: LoginScreenProps) {
             </span>
             <span>
               Acesso restrito a profissionais autorizados. Todos os acessos e visualizações são
-              registrados.
+              registrados. Dados protegidos pela LGPD.{' '}
+              <button type="button" onClick={() => setPrivacy(true)}
+                style={{ padding: 0, border: 0, background: 'none', font: 'inherit', color: 'var(--color-accent)', textDecoration: 'underline', textUnderlineOffset: 3, cursor: 'pointer' }}>
+                Aviso de privacidade
+              </button>
             </span>
           </div>
         </form>
+        <PrivacyDialog open={privacy} onClose={() => setPrivacy(false)} />
       </div>
 
       <div

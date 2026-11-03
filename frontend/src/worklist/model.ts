@@ -31,7 +31,7 @@ export function periodDates(period: Period, now = new Date()): { dateFrom: strin
 }
 export function initialWorklist(now = new Date()): WorklistState {
   return { field: 'patientName', filters: { patientName: '', patientId: '', accessionNumber: '', studyDescription: '', institutionName: '' },
-    period: '7days', ...periodDates('7days', now), modality: '', sort: 'dateDesc', limit: 25, offset: 0, advanced: false };
+    period: 'today', ...periodDates('today', now), modality: '', sort: 'dateDesc', limit: 25, offset: 0, advanced: false };
 }
 function validDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;

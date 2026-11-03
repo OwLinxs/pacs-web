@@ -17,7 +17,7 @@ test('estado inicial e filtros AND explícitos sem inventar curingas', () => {
  const state = initialWorklist(new Date(2026,8,28));
  assert.equal(state.sort,'dateDesc'); assert.equal(state.limit,25); assert.equal(state.offset,0);
  state.filters.patientName=' FICTICIO* ';state.filters.patientId='SYNTHETIC';state.modality='NEW';
- const query=studyQuery(state);assert.equal(query.patientName,'FICTICIO*');assert.equal(query.patientId,'SYNTHETIC');assert.equal(query.modality,'NEW');assert.equal(query.dateFrom,'2026-09-22');
+ const query=studyQuery(state);assert.equal(query.patientName,'FICTICIO*');assert.equal(query.patientId,'SYNTHETIC');assert.equal(query.modality,'NEW');assert.equal(query.dateFrom,'2026-09-28');assert.equal(query.dateTo,'2026-09-28');assert.equal(state.period,'today');
 });
 test('datas inválidas e período invertido são bloqueados antes da consulta', () => {
  const state=initialWorklist();assert.equal(validateWorklist(state),'');

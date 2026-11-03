@@ -112,4 +112,16 @@ func TestPostgresUsageCivilDaysAndPreviousPeriod(t *testing.T) {
 	if u != want {
 		t.Fatalf("uso incorreto: %+v", u)
 	}
+
+	// Usuário em duas unidades conta em ambas; unidade sem login não aparece.
+	if _, err := pool.Exec(ctx, `INSERT INTO units(slug,name,kind) VALUES('upa-sint','UPA Sintética','UPA'),('ubs-sint','UBS Sintética','UBS'),('ubs-vazia','UBS Vazia','UBS')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO user_units(user_id,unit_id) SELECT $1::uuid,id FROM units WHERE slug IN ('upa-sint','ubs-sint') UNION ALL SELECT $2::uuid,id FROM units WHERE slug='upa-sint'`, ids[0], ids[1]); err != nil {
+		t.Fatal(err)
+	}
+	units, err := audit.NewRecorder(pool, slog.New(slog.NewTextHandler(io.Discard, nil))).UnitAccess(ctx, current)
+	if err != nil || len(units) != 2 || units[0] != (stats.UnitAccess{Name: "UPA Sintética", ActiveUsers: 2, Logins: 3}) || units[1] != (stats.UnitAccess{Name: "UBS Sintética", ActiveUsers: 1, Logins: 2}) {
+		t.Fatalf("acessos por unidade: %+v %v", units, err)
+	}
 }

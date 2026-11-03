@@ -21,7 +21,7 @@ export function ColumnChart({ title, subtitle, columns, unit }: { title: string;
   const every = Math.max(1, Math.ceil(columns.length / 12));
   const shown = active === null ? null : columns[active];
   return <figure style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-    <figcaption><h2 style={{ margin: 0, fontSize: 22 }}>{title}</h2><span style={{ fontSize: 13, color: AXIS }}>{subtitle}</span></figcaption>
+    <figcaption style={{ margin: 0, fontSize: 'inherit' }}><h2 style={{ margin: 0, fontSize: 22, color: 'var(--color-text)' }}>{title}</h2><span style={{ fontSize: 13, color: AXIS }}>{subtitle}</span></figcaption>
     <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr', columnGap: 8 }}>
       <div aria-hidden="true" style={{ position: 'relative', height: PLOT_HEIGHT }}>
         {ticks.map(t => <span key={t} style={{ position: 'absolute', right: 0, bottom: `${(t / top) * 100}%`, transform: 'translateY(50%)', fontSize: 11, color: AXIS }}>{compact(t)}</span>)}
