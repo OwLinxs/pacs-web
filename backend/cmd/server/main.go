@@ -18,7 +18,10 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func main() {
@@ -52,8 +55,9 @@ func main() {
 	}
 
 	if err != nil {
-		// Erros de driver/infraestrutura podem conter URLs ou valores sensíveis.
-		log.Error("encerrando com erro", "comando", comando)
+		// Erros de driver/infraestrutura podem conter URLs ou valores sensíveis:
+		// só sai uma categoria fixa e o SQLSTATE, nunca a mensagem.
+		log.Error("encerrando com erro", "comando", comando, "tipo", categoriaErro(err))
 		os.Exit(1)
 	}
 }
@@ -85,3 +89,30 @@ Variáveis de ambiente: veja .env.example.
 }
 
 var errFaltaSubcomando = errors.New("informe um subcomando (ex.: admin create)")
+
+// categoriaErro resume o erro sem texto do driver (que pode citar host, usuário
+// ou trechos da DSN). SQLSTATE é um código fixo do PostgreSQL.
+func categoriaErro(err error) string {
+	var pg *pgconn.PgError
+	switch {
+	case errors.As(err, &pg):
+		switch pg.Code {
+		case "28P01", "28000":
+			return "autenticação recusada pelo banco (usuário/senha da DSN) [" + pg.Code + "]"
+		case "42501":
+			return "sem permissão (a conta não pode criar/alterar tabelas; não use APP_DATABASE_URL) [" + pg.Code + "]"
+		case "3D000":
+			return "banco inexistente na DSN [" + pg.Code + "]"
+		}
+		return "erro SQL [" + pg.Code + "]"
+	case strings.Contains(err.Error(), "DATABASE_URL inválida"):
+		return "DSN inválida (formato ou caracteres especiais sem codificação)"
+	case errors.As(err, new(*pgconn.ConnectError)):
+		return "falha de conexão (host/porta da DSN; dentro do Compose use postgres:5432)"
+	case strings.Contains(err.Error(), "já aplicada com conteúdo diferente"):
+		return "migration aplicada foi alterada"
+	case strings.Contains(err.Error(), "DSN de migration ausente"):
+		return "DSN de migration ausente"
+	}
+	return "outro"
+}

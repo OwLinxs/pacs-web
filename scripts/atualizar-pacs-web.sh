@@ -25,7 +25,10 @@
 #   HEALTH_TIMEOUT   segundos aguardando readiness (padrão: 120)
 #   BACKUP_CMD       backup do banco antes de migrations
 #                    (padrão: /usr/local/sbin/pacs-web-db-backup.sh)
-#   MIGRATION_DATABASE_URL  DSN da role de migration; se ausente, é pedida sem eco
+#   MIGRATION_DATABASE_URL  DSN da role de migration. Se ausente, usa a conta dona
+#                    do banco (POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB lidos do
+#                    container postgres, sem eco); sem elas, é pedida sem eco.
+#                    NÃO use APP_DATABASE_URL: a role runtime não cria tabelas.
 set -Eeuo pipefail
 
 BRANCH="${PACS_WEB_BRANCH:-main}"
@@ -50,6 +53,49 @@ for arg in "$@"; do
 done
 
 log()  { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+# Percent-encoding byte a byte (RFC 3986) para montar a DSN sem quebrar com @ : / ? # %.
+urlencode() {
+  local LC_ALL=C s="$1" out="" c i n
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      [a-zA-Z0-9.~_-]) out+="$c" ;;
+      # & 255: bytes acima de 127 podem vir negativos conforme a versão do bash.
+      *) printf -v n '%d' "'$c"; printf -v c '%%%02X' $((n & 255)); out+="$c" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+# Nome da role runtime (usuário de APP_DATABASE_URL no .env). Só o nome; a senha
+# nunca é lida. Recusa nomes fora do padrão simples de identificador.
+runtime_role() {
+  local line role
+  line="$(grep -m1 '^APP_DATABASE_URL=' .env)" || return 1
+  role="$(sed -E 's#^APP_DATABASE_URL=["'"'"']?postgres(ql)?://([^:@/]+)[:@].*#\2#' <<<"$line")"
+  [[ "$role" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] || return 1
+  printf '%s' "$role"
+}
+# Grants mínimos da role runtime (docs/HARDENING.md): DML nas tabelas da aplicação,
+# somente SELECT em schema_migrations, sequência da auditoria. Sem DDL. Idempotente.
+apply_grants() {
+  docker compose exec -T -e RUNTIME_ROLE="$1" postgres \
+    sh -c 'psql -q -v ON_ERROR_STOP=1 -v role="$RUNTIME_ROLE" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO :"role";
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON schema_migrations FROM :"role";
+GRANT SELECT ON schema_migrations TO :"role";
+GRANT USAGE, SELECT ON SEQUENCE audit_events_id_seq TO :"role";
+SQL
+}
+# DSN da conta dona do banco, a partir do ambiente do container postgres.
+# Nada é impresso; a senha só existe na variável exportada para o migrate.
+owner_dsn() {
+  local user pass db
+  user="$(docker compose exec -T postgres printenv POSTGRES_USER 2>/dev/null)" || return 1
+  pass="$(docker compose exec -T postgres printenv POSTGRES_PASSWORD 2>/dev/null)" || return 1
+  db="$(docker compose exec -T postgres printenv POSTGRES_DB 2>/dev/null)" || return 1
+  [[ -n "$user" && -n "$pass" && -n "$db" ]] || return 1
+  printf 'postgres://%s:%s@postgres:5432/%s?sslmode=disable' "$(urlencode "$user")" "$(urlencode "$pass")" "$(urlencode "$db")"
+}
 fail() { log "ERRO: $*" >&2; exit 1; }
 confirm() {
   # $1 = pergunta; $2 = "sempre" para perguntar mesmo com --sim
@@ -206,19 +252,30 @@ if $WITH_MIGRATIONS; then
   "$BACKUP_CMD" || { undo_build; fail "backup falhou; nada foi migrado"; }
   confirm "Backup concluído e conferido. Aplicar migrations agora?" sempre || { undo_build; fail "cancelado antes das migrations"; }
   if [[ -z "${MIGRATION_DATABASE_URL:-}" ]]; then
-    read -r -s -p "MIGRATION_DATABASE_URL (role de migration, sem eco): " MIGRATION_DATABASE_URL </dev/tty; echo
+    if MIGRATION_DATABASE_URL="$(owner_dsn)"; then
+      log "Migrations com a conta dona do banco (POSTGRES_USER do container postgres)."
+    else
+      log "Não foi possível ler a conta dona do banco no container postgres."
+      read -r -s -p "MIGRATION_DATABASE_URL (role com permissão de criar tabelas, NÃO a APP_DATABASE_URL; sem eco): " MIGRATION_DATABASE_URL </dev/tty; echo
+    fi
   fi
   export MIGRATION_DATABASE_URL
   # Valor passado pelo ambiente (-e NOME), nunca na linha de comando.
   if ! docker compose run --rm --no-deps -e MIGRATION_DATABASE_URL app migrate; then
     unset MIGRATION_DATABASE_URL
     undo_build
-    fail "migrate falhou (cada migration roda em transação). App atual segue em execução; confira schema_migrations."
+    fail "migrate falhou (cada migration roda em transação; veja 'tipo' na linha de erro acima). App atual segue em execução; confira schema_migrations."
   fi
   unset MIGRATION_DATABASE_URL
   MIGRATED=true
-  log "Migrations aplicadas. Reaplique os grants mínimos da role runtime aos objetos novos (docs/HARDENING.md)."
-  confirm "Grants da role runtime reaplicados? Iniciar a nova versão?" sempre || fail "parado após migrations; nova versão NÃO iniciada. Inicie com: docker compose up -d --no-deps --no-build app"
+  log "Migrations aplicadas."
+  if RUNTIME_ROLE="$(runtime_role)" && confirm "Aplicar os grants mínimos da role runtime ($RUNTIME_ROLE) às tabelas novas (docs/HARDENING.md)?" sempre; then
+    apply_grants "$RUNTIME_ROLE" || fail "falha ao aplicar grants; nova versão NÃO iniciada. Corrija e inicie com: docker compose up -d --no-deps --no-build app"
+    log "Grants aplicados à role $RUNTIME_ROLE."
+  else
+    log "Reaplique manualmente os grants mínimos da role runtime aos objetos novos (docs/HARDENING.md)."
+    confirm "Grants da role runtime reaplicados? Iniciar a nova versão?" sempre || fail "parado após migrations; nova versão NÃO iniciada. Inicie com: docker compose up -d --no-deps --no-build app"
+  fi
 fi
 
 restart_services
