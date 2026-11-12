@@ -39,6 +39,8 @@ export function syntheticDICOM({ calibrated = true, width = 32, height = 32, mon
     element(0x28, 0x101, 'US', us(12)), element(0x28, 0x102, 'US', us(11)), element(0x28, 0x103, 'US', us(0)),
     ...(exportMetadata ? [element(0x28,0x301,'CS','NO')] : []),
     element(0x28, 0x1050, 'DS', '2048'), element(0x28, 0x1051, 'DS', '4096'),
+    // Regressão: loader 5.11 truncava VOILUTFunction para "L" e o viewport principal falhava (consoles DR E-COM).
+    element(0x28, 0x1056, 'CS', 'LINEAR'),
     element(0x7fe0, 0x10, 'OW', pixels),
   ]);
 }

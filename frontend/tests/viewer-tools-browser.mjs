@@ -76,7 +76,11 @@ export async function testViewerTools({ evaluate, command, key, count, choose, p
   const mountedListeners = await listeners();
   await evaluate("document.querySelector('header button').click()");
   await until(() => evaluate("!!document.querySelector('[role=button]')"));
-  assert.equal(await listeners(), mountedListeners - 1);
+  // A lista registra o próprio keydown (useAutoRefresh: detecção de atividade), em
+  // tempo variável. O do Viewer precisa sair: vazamento excede o limite aqui e
+  // reprova a contagem exata após reabrir (abaixo).
+  await pause(300);
+  assert.ok(await listeners() <= mountedListeners, 'keydown do Viewer removido ao fechar');
   await key('ArrowRight'); // sem Viewer não deve requisitar uma imagem
   await evaluate("document.querySelector('[role=button]').click()");
   await count('Imagem 1 / 3');

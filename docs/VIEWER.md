@@ -23,6 +23,30 @@ Regressão específica em Chrome com DICOM MONOCHROME1 sintético verifica esses
 fluxos e ativação manual. A regressão V2/V3/V4 usa o cenário sintético original
 separadamente. Nenhum paciente real participa dos testes.
 
+## Correção: VOI LUT Function (0028,1056) — DR E-COM/Aquila 500 D
+
+Sintoma: miniatura aparece, viewport principal mostra "Não foi possível carregar
+esta série ou imagem". Afetava todo DICOM que grava VOI LUT Function (ex.: console
+E-COM DR-2000 do Aquila 500 D da UPA). O aviso "Invalid vr type ox - using OW" no
+console é do dcmjs, inofensivo (Pixel Data em Implicit VR), e **não** era a causa.
+
+Causa: bug do `@cornerstonejs/dicom-image-loader` 5.11 — `createImage` indexa a
+string do metadado como array (`"LINEAR"[0] === "L"`) e o StackViewport lança
+`Invalid VOI LUT function`. A miniatura usa render CPU, que não passa por ali.
+
+Correção sem atualizar dependência: após `imageLoader.loadImage`, antes de entrar
+no cache, `cornerstone.ts` regrava `image.voiLUTFunction` a partir do módulo
+VOI LUT original, normalizado por `voiLutFunction.ts`. Aceita LINEAR e
+LINEAR_EXACT; ausente, inválido ou **SIGMOID** vira padrão LINEAR. SIGMOID fica de
+fora porque em 5.11 `viewport.resetProperties()` quebra em `setColormapGPU` com
+função sigmoide; exibir como LINEAR mantém WW/WL do DICOM e só muda a curva.
+Rever ao atualizar o Cornerstone.
+
+Testes: `viewer-voilut.test.mjs` (normalização) e fixture do smoke com
+`VOILUTFunction=LINEAR` (sem a correção, reproduz o sintoma). Diagnóstico feito
+com réplica sintética da estrutura de tags do equipamento; nenhum arquivo real
+saiu do Orthanc.
+
 ## Arquitetura atual
 
 `Browser → /api/... com sessão PACS → backend Go → internal/orthanc → Orthanc REST`.

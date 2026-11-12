@@ -1,10 +1,11 @@
-import { cache, Enums, imageLoader, init, RenderingEngine, utilities, type StackViewport } from '@cornerstonejs/core';
+import { cache, Enums, imageLoader, init, metaData, RenderingEngine, utilities, type StackViewport } from '@cornerstonejs/core';
 import { init as initLoader, wadouri } from '@cornerstonejs/dicom-image-loader';
 import { utilities as metadata } from '@cornerstonejs/metadata';
 import { createAnnotationSession, createViewerTools, initializeViewerTools, type ViewerTool } from './tools';
 
 import type { ExportSnapshot, ExportMetadata, ExportView } from './exportModel';
 import { fitToWindow, readPresentation, type PresentationState } from './presentation';
+import { normalizeVoiLutFunction } from './voiLutFunction';
 
 type NaturalizedImage = Partial<Record<'PatientName'|'PatientID'|'PatientBirthDate'|'PatientSex'|'PatientAge'|'StudyDate'|'AcquisitionTime'|'ContentTime'|'InstitutionName'|'StationName'|'SeriesNumber'|'ImageLaterality'|'Laterality'|'ViewPosition'|'KVP'|'Exposure'|'ExposureInuAs'|'FilterType'|'PixelSpacing'|'ImagerPixelSpacing'|'PixelSpacingCalibrationType'|'BurnedInAnnotation', unknown>>;
 function naturalValue(value:unknown):string {
@@ -143,6 +144,9 @@ export async function createViewerSession(lifetime: AbortSignal) {
       if (cached) return cached;
       const image = await imageLoader.loadImage(imageId, { requestType: Enums.RequestType.Interaction, priority: 0 });
       lifetime.throwIfAborted();
+      // Loader 5.11 grava só o 1º caractere de VOILUTFunction; ver voiLutFunction.ts.
+      const voi = metaData.get(Enums.MetadataModules.VOI_LUT, imageId) as { voiLUTFunction?: unknown } | undefined;
+      image.voiLUTFunction = normalizeVoiLutFunction(voi?.voiLUTFunction) as typeof image.voiLUTFunction;
       if (!cache.getImage(imageId)) await cache.putImageLoadObject(imageId, {
         promise: Promise.resolve(image),
         decache: () => wadouri.dataSetCacheManager.unload(imageId.slice('wadouri:'.length)),
