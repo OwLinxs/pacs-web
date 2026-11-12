@@ -145,15 +145,21 @@ restart_services() {
 log "Buscando atualizações de origin/${BRANCH}…"
 git fetch --quiet origin "$BRANCH"
 OLD="$(git rev-parse HEAD)"
+# Código a restaurar em falha. OLD pode recuar para a última implantação (base de
+# comparação/migrations), mas o código volta ao HEAD anterior: commits antigos
+# podem ter compose incompatível com o host (ex.: IP fixo antes de APP_BIND_IP).
+HEAD_BEFORE="$OLD"
 NEW="$(git rev-parse "origin/$BRANCH")"
 # Commit cuja imagem foi implantada por este script; detecta `git pull` manual sem build.
 DEPLOYED_FILE="$REPO/.git/pacs-web-deployed-commit"
 DEPLOYED="$(cat "$DEPLOYED_FILE" 2>/dev/null || true)"
-if [[ "$OLD" == "$NEW" && "$DEPLOYED" != "$OLD" ]]; then
+if [[ "$DEPLOYED" != "$OLD" ]]; then
   if [[ -n "$DEPLOYED" ]] && git cat-file -e "$DEPLOYED^{commit}" 2>/dev/null && git merge-base --is-ancestor "$DEPLOYED" "$OLD"; then
-    log "Código (${OLD:0:7}) está à frente da última implantação (${DEPLOYED:0:7}): a imagem será reconstruída."
+    # Vale também com commit novo no remoto: migrations entre a imagem em execução
+    # e o HEAD (git pull manual) precisam entrar na comparação.
+    log "Código (${OLD:0:7}) está à frente da última implantação (${DEPLOYED:0:7}): comparação parte de ${DEPLOYED:0:7}."
     OLD="$DEPLOYED"
-  else
+  elif [[ "$OLD" == "$NEW" ]]; then
     log "Sem registro da última implantação: a imagem será reconstruída a partir de ${OLD:0:7}."
     log "Migrations pendentes, se houver, fazem o app novo recusar subir e o rollback é automático."
     FORCE_REBUILD=true
@@ -170,7 +176,7 @@ if [[ "$OLD" == "$NEW" && "${FORCE_REBUILD:-false}" != true ]]; then
   docker compose logs --tail=40 app || true
   fail "app não ficou pronto após reiniciar; verifique .env e logs (docker compose logs app)"
 fi
-git merge-base --is-ancestor "$OLD" "$NEW" || fail "origin/$BRANCH não é fast-forward do HEAD local; intervenção manual necessária"
+git merge-base --is-ancestor "$HEAD_BEFORE" "$NEW" || fail "origin/$BRANCH não é fast-forward do HEAD local; intervenção manual necessária"
 
 echo
 log "Versão atual: ${OLD:0:7} → nova: ${NEW:0:7}"
@@ -219,12 +225,12 @@ fi
 MIGRATED=false
 # Antes de reiniciar o app: volta código e tag latest; o container atual nunca parou.
 undo_build() {
-  git reset --quiet --keep "$OLD"
+  git reset --quiet --keep "$HEAD_BEFORE"
   if [[ -n "$ROLLBACK_TAG" ]]; then docker image tag "$IMAGE:$ROLLBACK_TAG" "$IMAGE:latest"; fi
 }
 rollback() {
   log "Iniciando rollback para ${OLD:0:7}…"
-  git reset --quiet --keep "$OLD" || log "Falha ao voltar o código; verifique git status manualmente."
+  git reset --quiet --keep "$HEAD_BEFORE" || log "Falha ao voltar o código; verifique git status manualmente."
   if $MIGRATED; then
     log "ATENÇÃO: migrations já foram aplicadas. A versão anterior recusa schema desconhecido;"
     log "o rollback exige restaurar o backup do banco. O app NÃO foi reiniciado automaticamente."
@@ -243,7 +249,7 @@ git merge --quiet --ff-only "$NEW"
 log "Construindo imagem (frontend + backend)…"
 if ! docker compose build app; then
   undo_build
-  fail "build da nova versão falhou; código voltou para ${OLD:0:7}"
+  fail "build da nova versão falhou; código voltou para ${HEAD_BEFORE:0:7}"
 fi
 
 if $WITH_MIGRATIONS; then
@@ -285,7 +291,7 @@ if wait_ready; then
   echo "$NEW" >"$DEPLOYED_FILE"
   log "Atualização concluída: ${NEW:0:7} em execução e pronta."
   log "Conferir manualmente: login, Worklist e abertura de um estudo no Viewer."
-  if [[ -n "$ROLLBACK_TAG" ]]; then log "Rollback manual, se necessário: imagem $IMAGE:$ROLLBACK_TAG + git reset --keep ${OLD:0:7}"; fi
+  if [[ -n "$ROLLBACK_TAG" ]]; then log "Rollback manual, se necessário: imagem $IMAGE:$ROLLBACK_TAG + git reset --keep ${HEAD_BEFORE:0:7}"; fi
 else
   log "Nova versão não ficou pronta em ${HEALTH_TIMEOUT}s. Últimas linhas do log:"
   docker compose logs --tail=40 app || true
